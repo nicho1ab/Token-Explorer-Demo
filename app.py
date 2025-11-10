@@ -1,7 +1,7 @@
 """
 Token Explorer for Educators - Streamlit Application
 Enhanced version with all requested features for non-technical educators
-Deploy with: streamlit run token_explorer_app.py
+Deploy with: streamlit run app.py
 """
 
 import streamlit as st
@@ -1074,3 +1074,4 @@ def main():
 if __name__ == "__main__":
     main()
 """
+
