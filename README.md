@@ -255,6 +255,13 @@ If you use **Token Explorer for Educators** in your teaching or research, please
 }
 ```
 
+## Credits / Attribution
+
+This project builds upon code and ideas from [TKBEN Tokenizers Benchmarker](https://github.com/CTCycle/TKBEN-tokenizers-benchmarker).
+Original author: [CTCycle](https://github.com/CTCycle).
+
+Certain components, logic, or inspiration were directly adapted or modified from this open-source repository.
+
 ## License
 
 This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
