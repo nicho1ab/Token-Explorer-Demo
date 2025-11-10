@@ -9,7 +9,7 @@ from transformers import (
     BertTokenizer
 )
 
-# Sidebar model options
+# ----- CONFIG -----
 MODEL_OPTIONS = {
     "distilgpt2": ("distilgpt2", AutoModelForCausalLM, AutoTokenizer),
     "gpt2": ("gpt2", AutoModelForCausalLM, AutoTokenizer),
@@ -28,7 +28,6 @@ st.markdown(
 )
 st.info("""
 **How does an AI model generate text?**
-
 Each token is chosen by sampling from a probability distribution over all possible next tokens. *Temperature* controls how random the choice is — a lower temperature means the model picks more likely tokens, while a higher temperature adds diversity and unpredictability.
 
 This tool lets you step through generation, seeing probabilities, choices, and cumulative sentence likelihood — no coding required!
@@ -101,15 +100,28 @@ def decode_tokens(tokens, tokenizer):
 def prediction_step(
     model, tokenizer, input_text, temperature=1.0, top_k=5, is_bert=False
 ):
+    # --- BERT special input check ---
     if is_bert:
-        # Bert uses masked tokens for prediction
-        tokens = tokenizer.encode(input_text + " [MASK]", return_tensors="pt")
-        mask_index = (tokens == tokenizer.mask_token_id).nonzero()[0, 1].item()
+        # Ensure there is at least one [MASK] token and non-empty
+        cleaned_input = input_text.strip()
+        if not cleaned_input:
+            cleaned_input = "[MASK]"
+        elif '[MASK]' not in cleaned_input:
+            cleaned_input += " [MASK]"
+        tokens = tokenizer.encode(cleaned_input, return_tensors="pt")
+        mask_indices = (tokens == tokenizer.mask_token_id).nonzero(as_tuple=True)[1].tolist()
+        if not mask_indices:
+            raise ValueError("BERT mode requires a [MASK] token in the input.")
+        mask_index = mask_indices[0]
         with torch.no_grad():
             outputs = model(tokens)
         logits = outputs.logits[0, mask_index]
     else:
-        tokens = tokenizer.encode(input_text, return_tensors="pt")
+        # For GPT-style models, just use input as is
+        cleaned_input = input_text.strip()
+        if cleaned_input == "":
+            raise ValueError("Input text cannot be empty for GPT-style models.")
+        tokens = tokenizer.encode(cleaned_input, return_tensors="pt")
         with torch.no_grad():
             outputs = model(tokens)
         logits = outputs.logits[0, -1]
@@ -118,9 +130,9 @@ def prediction_step(
     top_tokens = [tokenizer.decode([i]) for i in top_indices]
     top_probs = probs[top_indices]
     top_ids = top_indices.tolist()
-    selected_idx = np.random.choice(top_indices, p=top_probs / top_probs.sum())
-    selected_token = tokenizer.decode([selected_idx])
-    selected_prob = probs[selected_idx]
+    selected_idx = np.random.choice(len(top_probs), p=top_probs / top_probs.sum())
+    selected_token = top_tokens[selected_idx]
+    selected_prob = top_probs[selected_idx]
     return {
         "top_tokens": top_tokens,
         "top_probs": top_probs,
@@ -128,33 +140,49 @@ def prediction_step(
         "selected_token": selected_token,
         "selected_prob": selected_prob,
         "logits": logits,
+        "selected_index": selected_idx,
+        "input_text_used": cleaned_input
     }
 
 is_bert = chosen_model.startswith("bert")
+prediction_error = None
+pred = None
+
 if st.button("Predict Next Token"):
-    pred = prediction_step(
-        model, tokenizer, input_text, temperature, top_k, is_bert
-    )
-    st.session_state.input_text = input_text
-    st.session_state.last_logits = pred["logits"]
-    st.session_state.generated_tokens = [pred["selected_token"]]
-    st.session_state.probabilities = [pred["selected_prob"]]
-    st.session_state.cumulative_probs = [pred["selected_prob"]]
-    token_display = [pred["selected_token"]]
+    try:
+        pred = prediction_step(
+            model, tokenizer, input_text, temperature, top_k, is_bert
+        )
+        st.session_state.input_text = input_text
+        st.session_state.last_logits = pred["logits"]
+        st.session_state.generated_tokens = [pred["selected_token"]]
+        st.session_state.probabilities = [pred["selected_prob"]]
+        st.session_state.cumulative_probs = [pred["selected_prob"]]
+        token_display = [pred["selected_token"]]
+    except Exception as e:
+        prediction_error = str(e)
+        token_display = []
 elif st.button("Continue One Token"):
-    # Compose previous tokens into new input
-    previous_text = st.session_state.input_text + "".join(st.session_state.generated_tokens)
-    pred = prediction_step(
-        model, tokenizer, previous_text, temperature, top_k, is_bert
-    )
-    st.session_state.generated_tokens.append(pred["selected_token"])
-    st.session_state.probabilities.append(pred["selected_prob"])
-    cumulative = np.prod(st.session_state.probabilities)
-    st.session_state.cumulative_probs.append(cumulative)
-    st.session_state.last_logits = pred["logits"]
-    token_display = st.session_state.generated_tokens
+    try:
+        previous_text = st.session_state.input_text + "".join(st.session_state.generated_tokens)
+        pred = prediction_step(
+            model, tokenizer, previous_text, temperature, top_k, is_bert
+        )
+        st.session_state.generated_tokens.append(pred["selected_token"])
+        st.session_state.probabilities.append(pred["selected_prob"])
+        cumulative = np.prod(st.session_state.probabilities)
+        st.session_state.cumulative_probs.append(cumulative)
+        st.session_state.last_logits = pred["logits"]
+        token_display = st.session_state.generated_tokens
+    except Exception as e:
+        prediction_error = str(e)
+        token_display = st.session_state.generated_tokens
 else:
     token_display = st.session_state.generated_tokens
+
+if prediction_error:
+    st.error(f"Error: {prediction_error}")
+    st.stop()
 
 # ----- GUESS MODE -----
 if guess_mode and st.session_state.last_logits is not None:
@@ -165,7 +193,6 @@ if guess_mode and st.session_state.last_logits is not None:
     )
     logits = st.session_state.last_logits.cpu().numpy()
     probs = softmax(logits, temperature)
-    # Find matching token index
     guess_token_id = None
     if guess:
         try:
@@ -177,7 +204,8 @@ if guess_mode and st.session_state.last_logits is not None:
         st.write(f"Your guess: '{guess}' is token ID {guess_token_id}")
         st.write(f"Model's probability for your guess: {guess_prob:.5f}")
     else:
-        st.write("Invalid or unrecognized token for this model.")
+        if guess:
+            st.write("Invalid or unrecognized token for this model.")
 
 # ----- PROBABILITIES CHART -----
 def plot_probabilities(tokens, probs, top_ids, selected_idx, show_ids, show_logprobs):
@@ -207,7 +235,7 @@ def plot_probabilities(tokens, probs, top_ids, selected_idx, show_ids, show_logp
     ax.set_xlabel("Probability", fontsize=14)
     for spine in ax.spines.values():
         spine.set_visible(False)
-    # Highlight selected token
+    # Highlight selected token (lightblue overlay)
     ax.barh(selected_idx, probs[selected_idx], color="lightblue", edgecolor="black")
     st.pyplot(fig)
 
@@ -218,7 +246,7 @@ if st.session_state.last_logits is not None:
     top_tokens = [tokenizer.decode([i]) for i in top_indices]
     top_probs = pred_probs[top_indices]
     top_ids = top_indices.tolist()
-    selected_idx = np.argmax(top_probs)
+    selected_idx = np.argmax(top_probs)  # Displays top probability as highlight
     if show_prob_chart:
         st.markdown("#### Top-k Token Probabilities")
         plot_probabilities(
@@ -271,7 +299,6 @@ if st.session_state.cumulative_probs:
     st.pyplot(fig2)
 
 # ----- END -----
-
 st.markdown("---")
 st.markdown(
     "<div style='font-size:16px;text-align:center;'>Built for educators. No code required.</div>",
