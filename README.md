@@ -220,7 +220,7 @@ plotly >= 5.17.0
 ## 📖 Documentation
 
 - [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) - Detailed deployment instructions
-- [token_explorer_app.py](token_explorer_app.py) - Main application code
+- [app.py](app.py) - Main application code
 - [requirements.txt](requirements.txt) - Python dependencies
 
 ---
