@@ -39,7 +39,7 @@ Perfect for classroom demonstrations, workshops, and educational outreach about 
 
 ## Live Demo
 
-Try the app online: [Token Explorer on Streamlit Community Cloud](#) *(link will be added after deployment)*
+Try the app online: [Token Explorer on Streamlit Community Cloud](https://go.uic.edu/Token-Explorer) 
 
 ## Getting Started Locally
 
