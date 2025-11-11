@@ -6,6 +6,8 @@ Features:
 - Confidence Tracking: Continue One Token loop
 - Human vs AI Visualization: grouped bar chart in Poll Mode
 - Printable Activity Handouts (PDF) via reportlab
+- High-Contrast & Font-Size dynamic toggles
+- Word Cloud Visualization using 'wordcloud'
 
 Run: streamlit run app.py
 """
@@ -29,8 +31,11 @@ from reportlab.pdfgen import canvas as rl_canvas
 from reportlab.lib.units import inch
 from reportlab.platypus import Table, TableStyle
 
+# NEW: Word cloud
+from wordcloud import WordCloud
+
 # ---------------------------------------------------------------------
-# Page config and minimal CSS
+# Page config and base CSS
 # ---------------------------------------------------------------------
 st.set_page_config(
     page_title="Token Explorer for Educators",
@@ -39,6 +44,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Base CSS; dynamic overrides are injected later
 st.markdown("""
 <style>
     .stButton>button { min-height: 44px; min-width: 44px; font-size: 16px; }
@@ -266,6 +272,7 @@ def create_probability_chart(predictions):
     return fig
 
 def create_wordcloud_data(predictions):
+    # still used to show tabular data under the word cloud
     return pd.DataFrame(
         [{'token': t, 'probability': p*100} for t, p in list(predictions.items())[:50]]
     )
@@ -401,15 +408,9 @@ def generate_pdf_report(prompt_text: str, params: dict, metrics: dict, predictio
     return buf.read()
 
 # ---------------------------------------------------------------------
-# NEW: Activity Handout PDF generator
+# Activity Handout PDF generator
 # ---------------------------------------------------------------------
 def generate_activity_handout_pdf(activity_title: str, activity: dict) -> bytes:
-    """
-    Create a printable PDF handout with:
-      - Activity title, grade, duration, description
-      - Numbered steps
-      - Learning goals
-    """
     buf = BytesIO()
     c = rl_canvas.Canvas(buf, pagesize=LETTER)
     width, height = LETTER
@@ -417,72 +418,53 @@ def generate_activity_handout_pdf(activity_title: str, activity: dict) -> bytes:
     x = margin
     y = height - margin
 
-    # Header
     c.setTitle(f"{activity_title} - Handout")
-    c.setFont("Helvetica-Bold", 18)
-    c.drawString(x, y, activity_title)
+    c.setFont("Helvetica-Bold", 18); c.drawString(x, y, activity_title)
     y -= 20
-    c.setFont("Helvetica", 10)
-    c.setFillColor(colors.grey)
+    c.setFont("Helvetica", 10); c.setFillColor(colors.grey)
     c.drawString(x, y, f"Printable Activity Handout • Generated {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    c.setFillColor(colors.black)
-    y -= 14
-    c.line(x, y, width - margin, y)
-    y -= 18
+    c.setFillColor(colors.black); y -= 14
+    c.line(x, y, width - margin, y); y -= 18
 
-    # Meta
     c.setFont("Helvetica-Bold", 12); c.drawString(x, y, "Grade Level:"); c.setFont("Helvetica", 12)
     c.drawString(x + 90, y, activity.get("grade_level","N/A")); y -= 16
     c.setFont("Helvetica-Bold", 12); c.drawString(x, y, "Duration:"); c.setFont("Helvetica", 12)
     c.drawString(x + 90, y, activity.get("duration","N/A")); y -= 14
 
-    # Description
     y -= 6
     c.setFont("Helvetica-Bold", 12); c.drawString(x, y, "Description:")
     y -= 16
     y = _draw_wrapped_text(c, activity.get("description",""), x, y, max_width=width - 2*margin, font_size=11)
 
-    # Steps
     y -= 8
     c.setFont("Helvetica-Bold", 12); c.drawString(x, y, "Steps:")
     y -= 16
     c.setFont("Helvetica", 11)
     for idx, step in enumerate(activity.get("steps", []), start=1):
-        bullet = f"{idx}. "
-        # wrap each step
-        y = _draw_wrapped_text(c, bullet + step, x, y, max_width=width - 2*margin, font_size=11)
+        y = _draw_wrapped_text(c, f"{idx}. {step}", x, y, max_width=width - 2*margin, font_size=11)
         y -= 2
         if y < margin + 120:
             c.showPage(); y = height - margin
             c.setFont("Helvetica-Bold", 12); c.drawString(x, y, "Steps (cont'd):")
-            y -= 16
-            c.setFont("Helvetica", 11)
+            y -= 16; c.setFont("Helvetica", 11)
 
-    # Learning goals
     y -= 6
     c.setFont("Helvetica-Bold", 12); c.drawString(x, y, "Learning Goals:")
-    y -= 16
-    c.setFont("Helvetica", 11)
+    y -= 16; c.setFont("Helvetica", 11)
     for goal in activity.get("learning_goals", []):
-        # Use a small dash to mark bullets; keep numbered steps above
         y = _draw_wrapped_text(c, f"• {goal}", x, y, max_width=width - 2*margin, font_size=11)
         y -= 2
         if y < margin + 80:
             c.showPage(); y = height - margin
             c.setFont("Helvetica-Bold", 12); c.drawString(x, y, "Learning Goals (cont'd):")
-            y -= 16
-            c.setFont("Helvetica", 11)
+            y -= 16; c.setFont("Helvetica", 11)
 
-    # Footer
     y = max(y, margin + 40)
-    c.setFont("Helvetica-Oblique", 9)
-    c.setFillColor(colors.grey)
+    c.setFont("Helvetica-Oblique", 9); c.setFillColor(colors.grey)
     c.drawString(x, margin, "Token Explorer for Educators • Handout")
     c.setFillColor(colors.black)
 
-    c.showPage()
-    c.save()
-    buf.seek(0)
+    c.showPage(); c.save(); buf.seek(0)
     return buf.read()
 
 # ---------------------------------------------------------------------
@@ -508,12 +490,45 @@ def _ensure_state_defaults():
     st.session_state.setdefault('entropy', None)
     st.session_state.setdefault('perplexity', None)
 
-    # confidence tracking
     st.session_state.setdefault('sequence_tokens', [])
     st.session_state.setdefault('sequence_entropies', [])
     st.session_state.setdefault('sequence_top1_probs', [])
 
 _ensure_state_defaults()
+
+# ---------------------------------------------------------------------
+# Dynamic style injection for High-Contrast and Font-Size
+# ---------------------------------------------------------------------
+def apply_dynamic_styles():
+    font_map = {"Small": "14px", "Medium": "16px", "Large": "18px"}
+    base_size = font_map.get(st.session_state.get("font_size", "Medium"), "16px")
+
+    css_parts = [f"""
+    <style>
+      html, body, .markdown-text-container, .stMarkdown, .stText, .stRadio, .stSelectbox, .stMultiSelect,
+      .stDataFrame, .stMetric, .stTextInput, .stTextArea, .stSlider, .stDownloadButton, .stButton, .stExpander,
+      .stTabs, .stTab {{ font-size: {base_size}; line-height: 1.5; }}
+      .stTextInput input, .stTextArea textarea, .stSelectbox div[data-baseweb="select"] {{ font-size: {base_size}; }}
+      .stSlider div[role="slider"], .stButton>button, .stDownloadButton>button {{ font-size: {base_size}; }}
+    """]
+
+    if st.session_state.get("high_contrast", False):
+        css_parts.append("""
+        html, body { background-color: #000000 !important; color: #FFFFFF !important; }
+        .block-container, .stApp { background-color: #000000 !important; }
+        h1, h2, h3, h4, h5, h6, p, li, label, span, div { color: #FFFFFF !important; }
+        a { color: #00E5FF !important; text-decoration: underline; }
+        .stButton>button, .stDownloadButton>button {
+            background-color: #FFFFFF !important; color: #000000 !important; border: 2px solid #FFFFFF !important;
+        }
+        .stDataFrame, .dataframe, .stTable { filter: invert(1) hue-rotate(180deg); }
+        .probability-high { background-color: #00A65A !important; color: #FFFFFF !important; }
+        .probability-medium { background-color: #148EA1 !important; color: #FFFFFF !important; }
+        .probability-low { background-color: #C19A00 !important; color: #000000 !important; }
+        .probability-verylow { background-color: #888888 !important; color: #FFFFFF !important; }
+        """)
+    css_parts.append("</style>")
+    st.markdown("\n".join(css_parts), unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------
 # Main UI
@@ -531,12 +546,14 @@ def main():
 4) Generate predictions  
 5) Use **Continue One Token** to step and track entropy  
 6) Use **Class Poll Mode** for Human vs AI visualization  
-7) Print **Activity Handouts** for the classroom
+7) Print **Activity Handouts** for the classroom  
+8) Try the **Word Cloud** view of token probabilities
             """)
             if st.button("Got it"):
                 st.session_state.tutorial_shown = True
                 st.rerun()
 
+    # Top controls
     top_c1, top_c2, top_c3, top_c4, top_c5 = st.columns([2,2,2,1,1])
     with top_c1:
         if st.button("📖 Glossary"):
@@ -552,6 +569,9 @@ def main():
         st.session_state.font_size = st.selectbox("Font", ["Small","Medium","Large"],
                                                   index=["Small","Medium","Large"].index(st.session_state.font_size),
                                                   label_visibility="collapsed")
+
+    # Apply dynamic styles after toggles change
+    apply_dynamic_styles()
 
     st.markdown("---")
 
@@ -697,7 +717,7 @@ def main():
             st.markdown("---")
             st.markdown("### 📊 Visualizations")
             tab1, tab2, tab3, tab4 = st.tabs([
-                "📊 Probability Chart", "☁️ Word Cloud Data", "📈 Metrics Analysis", "📉 Confidence Tracking"
+                "📊 Probability Chart", "☁️ Word Cloud", "📈 Metrics Analysis", "📉 Confidence Tracking"
             ])
 
             with tab1:
@@ -714,13 +734,17 @@ def main():
                     st.warning(f"Chart export failed: {e}")
 
             with tab2:
-                df_wc = create_wordcloud_data(predictions)
-                st.dataframe(df_wc, use_container_width=True)
-                st.plotly_chart(
-                    px.bar(df_wc.head(20), x='probability', y='token', orientation='h',
-                           title="Token Probability Distribution (Top 20)"),
-                    use_container_width=True
-                )
+                # NEW: actual word cloud image from probabilities
+                try:
+                    wc = WordCloud(width=800, height=400, background_color='white')
+                    # WordCloud expects dict mapping token->weight
+                    wc.generate_from_frequencies(predictions)
+                    st.image(wc.to_array(), caption="Word Cloud of Token Probabilities", use_container_width=True)
+                    # Optional data table for transparency
+                    df_wc = create_wordcloud_data(predictions)
+                    st.dataframe(df_wc, use_container_width=True)
+                except Exception as e:
+                    st.warning(f"Word cloud failed: {e}")
 
             with tab3:
                 st.markdown(f"""
@@ -755,7 +779,7 @@ def main():
                     st.session_state.sequence_top1_probs = []
                     st.success("Tracking reset.")
 
-    # Right: activities + exports + NEW handout export
+    # Right: activities + exports + handout export
     with col_right:
         st.markdown("### 🏫 Classroom Activities")
         act = st.selectbox("Choose Activity", ["-- Select --"] + list(ACTIVITIES.keys()))
@@ -771,7 +795,7 @@ def main():
                 for g in a['learning_goals']:
                     st.markdown(f"- {g}")
 
-            # NEW: Printable Handout button
+            # Printable Handout button
             try:
                 pdf_handout = generate_activity_handout_pdf(act, a)
                 st.download_button(
@@ -848,9 +872,7 @@ def main():
         else:
             st.info("Generate predictions to enable exports.")
 
-    # -----------------------------------------------------------------
-    # Class Poll Mode with Human vs AI grouped bar visualization
-    # -----------------------------------------------------------------
+    # Class Poll Mode: Human vs AI grouped bar visualization
     if st.session_state.poll_mode:
         st.markdown("---")
         st.markdown("## 📊 Class Poll Mode")
@@ -872,7 +894,6 @@ def main():
         with c2:
             st.markdown("### 🧠 Human vs AI")
             if st.session_state.student_predictions and st.session_state.get('predictions'):
-                # Top-5 student predictions by vote share
                 counts = Counter(st.session_state.student_predictions)
                 total = len(st.session_state.student_predictions)
                 top5_students = counts.most_common(5)
@@ -881,14 +902,12 @@ def main():
                      "Percent": [(c/total)*100 for _, c in top5_students]}
                 )
 
-                # Top-5 AI predictions by probability
                 ai_items = list(st.session_state.predictions.items())[:5]
                 ai_df = pd.DataFrame(
                     {"Token": [t for t, _ in ai_items],
                      "Percent": [p*100 for _, p in ai_items]}
                 )
 
-                # Combine labels and build grouped data
                 tokens_union = sorted(set(student_df["Token"]).union(set(ai_df["Token"])))
                 combined_rows = []
                 for tok in tokens_union:
@@ -918,7 +937,6 @@ def main():
                 fig_cmp.update_layout(yaxis_title="Percent (%)", xaxis_title="Token", height=450)
                 st.plotly_chart(fig_cmp, use_container_width=True)
 
-                # Quick verdict message
                 top_student = top5_students[0][0]
                 top_ai = ai_items[0][0]
                 if top_student == top_ai:
@@ -932,7 +950,7 @@ def main():
     st.markdown("---")
     st.markdown("""
     <div style='text-align: center; color: #6C757D; padding: 20px;'>
-      <p><strong>Token Explorer for Educators</strong> | Printable Handouts Edition</p>
+      <p><strong>Token Explorer for Educators</strong> | Word Cloud Edition</p>
       <p>Making AI Transparent in the Classroom</p>
     </div>
     """, unsafe_allow_html=True)
