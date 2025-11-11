@@ -43,6 +43,21 @@ Your app will be live at: `https://your-app-name.streamlit.app`
 
 ---
 
+## 🔌 Hugging Face Inference (Live Probabilities)
+
+1. **Create a Hugging Face access token** with Inference permissions  
+2. **Set `HF_API_TOKEN`**  
+   - Local dev: `export HF_API_TOKEN="hf_xxx"` before running Streamlit  
+   - Streamlit Cloud: App → `Settings` → `Secrets` → add `HF_API_TOKEN`  
+3. **Supported defaults**  
+   - `GPT-2 (English)` → `gpt2`  
+   - `DistilGPT-2 (Fast)` → `distilgpt2`  
+   - `GPT-2 Spanish` → `datificate/gpt2-small-spanish`  
+4. **Fallback behavior**  
+   - If the token is missing or a model lacks a hosted endpoint, the app reverts to the built-in classroom simulator so demonstrations still work.
+
+---
+
 ## 📦 Alternative Deployment Options
 
 ### Option 1: Heroku

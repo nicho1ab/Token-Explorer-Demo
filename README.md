@@ -54,6 +54,13 @@ The app will open automatically at `http://localhost:8501`
 
 See [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for detailed instructions.
 
+### Connect to Hugging Face (Optional, Recommended)
+
+1. Create a free [Hugging Face access token](https://huggingface.co/settings/tokens) with “Inference” scope  
+2. Set the token as `HF_API_TOKEN` (Streamlit secrets, `.streamlit/secrets.toml`, or terminal export)  
+3. The app now calls the hosted GPT-2 model by default for live probabilities  
+4. If the token is missing or a model is unsupported, the classroom simulator automatically fills in fake probabilities
+
 ---
 
 ## 📚 What's Included
