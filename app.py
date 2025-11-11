@@ -24,6 +24,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 from huggingface_hub import InferenceClient
+from huggingface_hub.errors import HfHubHTTPError
 
 # ---------------------------------------------------------------------
 # Lightweight helpers
@@ -321,6 +322,27 @@ def generate_probabilities(prompt, model_name, temperature, top_k, top_p):
             request_kwargs["top_k"] = int(top_k)
 
         response = client.text_generation(prompt, **request_kwargs)
+    except StopIteration:
+        _maybe_notify_once(
+            f"hf_provider_unavailable_{model_name}",
+            "Hugging Face Inference could not be reached with the current configuration. Double-check `HF_API_TOKEN` or remove it to use simulator data.",
+            level="warning"
+        )
+        return _generate_simulated_probabilities(prompt, model_name, temperature, top_k, top_p)
+    except HfHubHTTPError as exc:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status == 401:
+            msg = "Hugging Face API rejected the token (401 Unauthorized). Verify `HF_API_TOKEN` has Inference API access."
+        elif status == 404:
+            msg = f"Hugging Face model `{hf_model_id}` not found. Using simulator data."
+        else:
+            msg = f"Hugging Face request failed ({status or 'HTTP error'}). Reverting to simulator data."
+        _maybe_notify_once(
+            f"hf_http_error_{model_name}",
+            msg,
+            level="warning"
+        )
+        return _generate_simulated_probabilities(prompt, model_name, temperature, top_k, top_p)
     except Exception as exc:
         _maybe_notify_once(
             f"hf_error_{model_name}",
