@@ -15,14 +15,13 @@ Token Explorer for Educators is an interactive web application designed to make 
 ### 🎯 Key Features
 
 ✅ **25 Curated Example Prompts** across 5 categories  
-✅ **Interactive Glossary** with simple and detailed explanations  
+✅ **Interactive Glossary & Help Panels** with classroom-friendly language  
 ✅ **5 AI Model Options** including multilingual support  
 ✅ **Advanced Parameter Controls** (Temperature, Top-k, Top-p)  
 ✅ **Class Poll Mode** for live student engagement  
-✅ **Enhanced Visualizations** (charts, metrics, comparisons)  
-✅ **Export Options** (PDF, CSV, images)  
-✅ **5 Ready-to-Use Classroom Activities** with lesson plans  
-✅ **Built-in Quiz Generator** for assessment  
+✅ **Streamlined Visualizations** (probability chart, metrics, confidence tracking)  
+✅ **Lightweight CSV & Text Exports** for sharing results  
+✅ **2 Ready-to-Use Classroom Activities** with summaries  
 ✅ **Full Accessibility Support** (WCAG 2.1 compliant)  
 ✅ **Standards Alignment** (CSTA, ISTE, Common Core)
 
@@ -41,7 +40,7 @@ cd token-explorer
 pip install -r requirements.txt
 
 # Run the application
-streamlit run token_explorer_app.py
+streamlit run app.py
 ```
 
 The app will open automatically at `http://localhost:8501`
@@ -75,28 +74,23 @@ See [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for detailed instructions.
 4. **GPT-2 Spanish** - Spanish language generation
 5. **DistilGPT-2 (Fast)** - Optimized for speed
 
-### Classroom Activities (5 ready-to-use)
+### Classroom Activities (2 ready-to-use)
 
 1. **Predict the Next Word Game** (Grades 3-8, 15-20 min)
 2. **Temperature Experiment** (Grades 6-12, 25-30 min)
-3. **Multilingual Token Discovery** (Grades 5-12, 20-25 min)
-4. **Bias Detection Workshop** (Grades 8-12, 35-45 min)
-5. **Creative Writing with AI** (Grades 4-10, 30-40 min)
 
 Each activity includes:
 - Step-by-step instructions
 - Learning goals
 - Discussion questions
-- Printable handouts
+- Downloadable summaries
 
-### Visualizations (6 types)
+### Visualizations (4 types)
 
-- 📊 **Probability Distribution** - Bar chart of top tokens
-- ☁️ **Word Cloud Data** - Size-based token visualization
-- 📈 **Metrics Analysis** - Entropy and perplexity
-- 🔄 **Model Comparison** - Side-by-side predictions
-- 📉 **Confidence Tracking** - Probability over time
-- 👥 **Human vs AI** - Student vs model predictions
+- 📊 **Probability Distribution** - Interactive bar chart of top tokens
+- 📋 **Token Table** - Ranked probabilities with CSV/text export
+- 📈 **Metrics Snapshot** - Entropy, perplexity, and top-token confidence
+- 📉 **Confidence Tracking** - Probability and entropy over time
 
 ---
 
@@ -266,12 +260,12 @@ Built with:
 ```bash
 pip install --upgrade pip
 pip install -r requirements.txt
-streamlit run token_explorer_app.py
+streamlit run app.py
 ```
 
 **Port already in use?**
 ```bash
-streamlit run token_explorer_app.py --server.port 8502
+streamlit run app.py --server.port 8502
 ```
 
 **Charts not displaying?**
