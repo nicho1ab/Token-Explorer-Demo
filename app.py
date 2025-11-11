@@ -1,6 +1,6 @@
 """
 Token Explorer for Educators - Streamlit Application
-Enhanced version with all requested features for non-technical educators
+Enhanced version with real PNG export via plotly.io.to_image
 Deploy with: streamlit run app.py
 """
 
@@ -16,7 +16,6 @@ from datetime import datetime
 import random
 import math
 from collections import Counter
-import base64
 from io import BytesIO
 
 # PDF generation
@@ -37,75 +36,15 @@ st.set_page_config(
 # Custom CSS for better styling and accessibility
 st.markdown("""
 <style>
-    /* High contrast and accessibility */
     .stButton>button {
         min-height: 44px;
         min-width: 44px;
         font-size: 16px;
     }
-
-    .tooltip {
-        position: relative;
-        display: inline-block;
-        border-bottom: 1px dotted #0066CC;
-        cursor: help;
-    }
-
-    .probability-high {
-        background-color: #28A745;
-        color: white;
-        padding: 8px;
-        border-radius: 5px;
-    }
-
-    .probability-medium {
-        background-color: #17A2B8;
-        color: white;
-        padding: 8px;
-        border-radius: 5px;
-    }
-
-    .probability-low {
-        background-color: #FFC107;
-        color: black;
-        padding: 8px;
-        border-radius: 5px;
-    }
-
-    .probability-verylow {
-        background-color: #6C757D;
-        color: white;
-        padding: 8px;
-        border-radius: 5px;
-    }
-
-    .activity-card {
-        border: 2px solid #0066CC;
-        padding: 15px;
-        border-radius: 10px;
-        margin: 10px 0;
-    }
-
-    .info-box {
-        background-color: #E7F3FF;
-        border-left: 5px solid #0066CC;
-        padding: 15px;
-        margin: 10px 0;
-    }
-
-    .success-box {
-        background-color: #D4EDDA;
-        border-left: 5px solid #28A745;
-        padding: 15px;
-        margin: 10px 0;
-    }
-
-    .warning-box {
-        background-color: #FFF3CD;
-        border-left: 5px solid #FFC107;
-        padding: 15px;
-        margin: 10px 0;
-    }
+    .probability-high { background-color: #28A745; color: white; padding: 8px; border-radius: 5px; }
+    .probability-medium { background-color: #17A2B8; color: white; padding: 8px; border-radius: 5px; }
+    .probability-low { background-color: #FFC107; color: black; padding: 8px; border-radius: 5px; }
+    .probability-verylow { background-color: #6C757D; color: white; padding: 8px; border-radius: 5px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -113,31 +52,31 @@ st.markdown("""
 GLOSSARY = {
     "Token": {
         "simple": "A piece of text that the AI model understands - like a word, part of a word, or punctuation.",
-        "detailed": "Tokens are the basic units that language models use to process text. A word like 'running' might be one token, while 'unbelievable' might be split into 'un', 'believe', and 'able'. This helps the model understand word patterns and meanings."
+        "detailed": "Tokens are the basic units that language models use to process text. A word like 'running' might be one token, while 'unbelievable' might be split into 'un', 'believe', and 'able'."
     },
     "Probability": {
-        "simple": "How likely the AI thinks a word should come next, shown as a percentage (0% to 100%).",
-        "detailed": "The model calculates probabilities for thousands of possible next tokens based on what it learned during training. Higher probability means the model is more confident that token should come next."
+        "simple": "How likely the AI thinks a word should come next, as a percentage.",
+        "detailed": "The model calculates probabilities for thousands of possible next tokens. Higher probability means a more likely next token."
     },
     "Temperature": {
-        "simple": "Controls how creative or predictable the AI is. Low = boring but safe, High = creative but risky.",
-        "detailed": "Temperature (0.0-2.0) adjusts how the model chooses tokens. At 0, it always picks the most likely word (deterministic). At higher values like 1.5, it takes more chances with less common words, making output more creative but potentially less coherent."
+        "simple": "Controls how creative or predictable the AI is.",
+        "detailed": "Temperature scales logits before softmax. Low = deterministic, high = more diverse and risky."
     },
     "Top-k": {
-        "simple": "Limits the AI to choosing from only the k most likely words (e.g., top 50 choices).",
-        "detailed": "Top-k sampling restricts the model to considering only the k tokens with highest probability. For example, with k=50, the model picks from the 50 most likely next words, ignoring all others. This prevents rare or nonsensical tokens."
+        "simple": "Consider only the k most likely tokens.",
+        "detailed": "Restricts sampling to top k tokens to avoid long-tail noise."
     },
     "Top-p (Nucleus)": {
-        "simple": "Picks from the smallest set of words that together add up to probability p (e.g., 90%).",
-        "detailed": "Also called nucleus sampling, top-p selects tokens dynamically. With p=0.9, it considers only enough top tokens to reach 90% cumulative probability. This adapts to context - more choices when uncertain, fewer when confident."
+        "simple": "Consider the smallest set of tokens whose cumulative probability ≥ p.",
+        "detailed": "Dynamically chooses the shortlist size based on uncertainty."
     },
     "Perplexity": {
-        "simple": "Measures how confused the AI is - lower numbers mean it's more confident in its predictions.",
-        "detailed": "Perplexity quantifies model uncertainty. A perplexity of 10 means the model is as confused as if choosing randomly among 10 options. Lower perplexity indicates better prediction quality and language understanding."
+        "simple": "Lower is better. Measures confusion.",
+        "detailed": "Roughly equals the number of equally likely choices the model is choosing among."
     },
     "Entropy": {
-        "simple": "Measures uncertainty - how spread out the probabilities are. Higher means more unpredictable.",
-        "detailed": "Entropy (in bits) measures the distribution of probabilities. Low entropy means one clear winner (predictable), high entropy means many equally likely options (unpredictable). It's related to perplexity: perplexity = 2^entropy."
+        "simple": "Higher means more uncertain.",
+        "detailed": "Shannon entropy in bits over the next-token distribution."
     }
 }
 
@@ -219,7 +158,7 @@ ACTIVITIES = {
     "Predict the Next Word Game": {
         "grade_level": "3-8",
         "duration": "15-20 minutes",
-        "description": "Students guess what word comes next, then compare with AI predictions to understand how models learn patterns.",
+        "description": "Students guess the next word, then compare with AI predictions.",
         "steps": [
             "Display a sentence with the last word hidden",
             "Have students write their predictions",
@@ -236,69 +175,18 @@ ACTIVITIES = {
     "Temperature Experiment": {
         "grade_level": "6-12",
         "duration": "25-30 minutes",
-        "description": "Explore how temperature affects creativity by generating multiple continuations at different settings.",
+        "description": "Explore how temperature affects creativity.",
         "steps": [
             "Start with the same prompt for all students",
-            "Generate predictions at temperature 0.2 (conservative)",
-            "Generate predictions at temperature 1.5 (creative)",
+            "Generate predictions at temperature 0.2",
+            "Generate predictions at temperature 1.5",
             "Compare and discuss differences",
-            "Create a chart showing variety vs. coherence"
+            "Chart variety vs. coherence"
         ],
         "learning_goals": [
             "Understanding parameters in AI systems",
             "Balancing creativity and accuracy",
             "Data analysis and comparison"
-        ]
-    },
-    "Multilingual Token Discovery": {
-        "grade_level": "5-12",
-        "duration": "20-25 minutes",
-        "description": "Compare how different languages are tokenized and explore cultural patterns in AI training data.",
-        "steps": [
-            "Input the same sentence in English and Spanish",
-            "Compare token counts and predictions",
-            "Discuss why some languages need more tokens",
-            "Explore cultural context in predictions",
-            "Test with student home languages if available"
-        ],
-        "learning_goals": [
-            "Language structure awareness",
-            "Cultural representation in AI",
-            "Multilingual communication"
-        ]
-    },
-    "Bias Detection Workshop": {
-        "grade_level": "8-12",
-        "duration": "35-45 minutes",
-        "description": "Examine how AI predictions might reflect biases in training data and discuss ethical implications.",
-        "steps": [
-            "Try prompts like 'The doctor walked into' vs 'The nurse walked into'",
-            "Record top predictions for occupations",
-            "Analyze for gender or other biases",
-            "Research where training data comes from",
-            "Discuss how to make AI more fair"
-        ],
-        "learning_goals": [
-            "Critical thinking about AI",
-            "Understanding bias and fairness",
-            "AI ethics and responsibility"
-        ]
-    },
-    "Creative Writing with AI": {
-        "grade_level": "4-10",
-        "duration": "30-40 minutes",
-        "description": "Use AI predictions as inspiration for creative writing, comparing human and machine creativity.",
-        "steps": [
-            "Students start a story with one sentence",
-            "AI suggests next words at high temperature",
-            "Students choose: use AI suggestion or their own",
-            "Continue for 5-10 rounds",
-            "Share and compare AI-assisted vs. original stories"
-        ],
-        "learning_goals": [
-            "Creative writing skills",
-            "Human-AI collaboration",
-            "Understanding AI capabilities and limitations"
         ]
     }
 }
@@ -307,47 +195,15 @@ ACTIVITIES = {
 QUIZ_QUESTIONS = [
     {
         "question": "What does 'temperature' control in a language model?",
-        "options": [
-            "How fast the model runs",
-            "How creative or predictable the output is",
-            "The physical temperature of the computer",
-            "The size of the vocabulary"
-        ],
+        "options": ["How fast the model runs", "How creative or predictable the output is", "The physical temperature of the computer", "The size of the vocabulary"],
         "correct": 1,
-        "explanation": "Temperature controls randomness: low temperature makes predictions predictable, high temperature makes them more creative and diverse."
+        "explanation": "Temperature controls randomness: low temperature is predictable, high temperature is more diverse."
     },
     {
         "question": "If a token has a probability of 0.8, what does that mean?",
-        "options": [
-            "It will definitely be chosen",
-            "There's an 80% chance the model thinks it should come next",
-            "It's 80% correct",
-            "The model is 80% trained"
-        ],
+        "options": ["It will definitely be chosen", "There's an 80% chance it comes next", "It's 80% correct", "The model is 80% trained"],
         "correct": 1,
-        "explanation": "Probability of 0.8 (or 80%) means the model assigns an 80% likelihood to that token being the next word, based on patterns it learned."
-    },
-    {
-        "question": "What is a 'token' in language models?",
-        "options": [
-            "A password to access the AI",
-            "A reward for good predictions",
-            "A piece of text like a word or word part",
-            "A type of computer chip"
-        ],
-        "correct": 2,
-        "explanation": "Tokens are the basic units AI models use to process text - they can be whole words, parts of words (like 'un' or 'ing'), or punctuation."
-    },
-    {
-        "question": "Lower perplexity means the model is...",
-        "options": [
-            "More confused",
-            "Making random guesses",
-            "More confident in its predictions",
-            "Using fewer tokens"
-        ],
-        "correct": 2,
-        "explanation": "Lower perplexity indicates the model is more certain about what comes next, showing better understanding of the language patterns."
+        "explanation": "0.8 probability means the model assigns an 80% likelihood that token comes next."
     }
 ]
 
@@ -360,7 +216,6 @@ def _build_top_tokens_table_data(predictions: dict, top_n: int = 10):
     return rows
 
 def _draw_wrapped_text(c, text, x, y, max_width, line_height=14, font_name="Helvetica", font_size=10):
-    """Simple word-wrap for ReportLab canvas."""
     c.setFont(font_name, font_size)
     words = text.split()
     line = ""
@@ -384,17 +239,6 @@ def generate_pdf_report(prompt_text: str,
                         metrics: dict,
                         predictions: dict,
                         fig) -> bytes:
-    """
-    Builds a single-PDF report containing:
-      - Title, timestamp
-      - Input prompt
-      - Parameters (temperature, top-k, top-p, model)
-      - Entropy / perplexity
-      - Top-10 tokens table
-      - Probability chart image (from Plotly via kaleido)
-    Returns PDF bytes.
-    """
-    # Render chart to PNG bytes via kaleido
     chart_png = None
     if fig is not None:
         chart_png = pio.to_image(fig, format="png", width=1200, height=700, scale=2)
@@ -406,7 +250,6 @@ def generate_pdf_report(prompt_text: str,
     x = margin
     y = height - margin
 
-    # Header
     c.setTitle("Token Explorer Report")
     c.setFont("Helvetica-Bold", 16)
     c.drawString(x, y, "Token Explorer for Educators — Prediction Report")
@@ -419,29 +262,24 @@ def generate_pdf_report(prompt_text: str,
     c.line(x, y, width - margin, y)
     y -= 18
 
-    # Prompt
     c.setFont("Helvetica-Bold", 12)
     c.drawString(x, y, "Input Prompt:")
     y -= 16
     y = _draw_wrapped_text(c, prompt_text or "(none)", x, y, max_width=width - 2*margin, font_size=11)
 
-    # Parameters
     y -= 6
     c.setFont("Helvetica-Bold", 12)
     c.drawString(x, y, "Parameters:")
     y -= 16
     c.setFont("Helvetica", 11)
-    p_lines = [
+    for line in [
         f"Temperature: {params.get('temperature')}",
         f"Top-k: {params.get('top_k')}",
         f"Top-p: {params.get('top_p')}",
         f"Model: {params.get('model_name')}",
-    ]
-    for line in p_lines:
-        c.drawString(x, y, line)
-        y -= 14
+    ]:
+        c.drawString(x, y, line); y -= 14
 
-    # Metrics
     y -= 6
     c.setFont("Helvetica-Bold", 12)
     c.drawString(x, y, "Metrics:")
@@ -453,10 +291,8 @@ def generate_pdf_report(prompt_text: str,
         f"Top Token Probability: {max(predictions.values())*100:.1f}%" if predictions else "Top Token Probability: n/a",
     ]
     for line in m_lines:
-        c.drawString(x, y, line)
-        y -= 14
+        c.drawString(x, y, line); y -= 14
 
-    # Top-10 tokens table
     y -= 10
     c.setFont("Helvetica-Bold", 12)
     c.drawString(x, y, "Top-10 Tokens:")
@@ -475,8 +311,8 @@ def generate_pdf_report(prompt_text: str,
         ("FONTSIZE", (0,1), (-1,-1), 10),
         ("ALIGN", (0,0), (-1,-1), "LEFT"),
     ]))
-    needed_height = 14 * len(table_data)  # rough estimate
-    if y - needed_height < margin + 220:  # leave space for chart image
+    needed_height = 14 * len(table_data)
+    if y - needed_height < margin + 220:
         c.showPage()
         y = height - margin
         c.setFont("Helvetica-Bold", 12)
@@ -487,7 +323,6 @@ def generate_pdf_report(prompt_text: str,
     tbl.drawOn(c, x, y - (14 * len(table_data)))
     y -= (14 * len(table_data) + 18)
 
-    # Chart image
     if chart_png:
         if y < margin + 220:
             c.showPage()
@@ -506,7 +341,6 @@ def generate_pdf_report(prompt_text: str,
     return buf.read()
 
 def export_chart_png(fig) -> bytes:
-    """Return chart as PNG bytes via kaleido."""
     if fig is None:
         return b""
     return pio.to_image(fig, format="png", width=1200, height=700, scale=2)
@@ -527,27 +361,19 @@ if 'font_size' not in st.session_state:
 
 # Simulated tokenization function
 def tokenize_text(text, model_name):
-    """Simulate tokenization based on model type"""
     tokens = []
     words = text.split()
-
     for word in words:
         if len(word) > 8 and "BERT" in model_name:
-            # Simulate subword tokenization for BERT
-            tokens.append(word[:3])
-            tokens.append("##" + word[3:6])
+            tokens.append(word[:3]); tokens.append("##" + word[3:6])
             if len(word) > 6:
                 tokens.append("##" + word[6:])
         else:
             tokens.append(word)
-
     return tokens
 
 # Simulated probability generation
 def generate_probabilities(prompt, model_name, temperature, top_k, top_p):
-    """Generate realistic probability distributions for next tokens"""
-
-    # Context-aware token suggestions
     context_predictions = {
         "The cat sat on the": {
             "mat": 0.35, "chair": 0.20, "floor": 0.15, "table": 0.12,
@@ -571,40 +397,31 @@ def generate_probabilities(prompt, model_name, temperature, top_k, top_p):
         }
     }
 
-    # Find closest match or use default
     predictions = None
     for key in context_predictions:
         if key.lower() in prompt.lower():
             predictions = context_predictions[key].copy()
             break
 
-    # Default predictions if no match
     if predictions is None:
         default_tokens = ["the", "a", "and", "is", "to", "of", "in", "it", "for", "on"]
         predictions = {token: random.uniform(0.05, 0.25) for token in default_tokens}
-        # Normalize
         total = sum(predictions.values())
         predictions = {k: v/total for k, v in predictions.items()}
 
-    # Apply temperature scaling
     if temperature > 0:
-        # Convert to logits and apply temperature
         logits = {k: math.log(v) / temperature for k, v in predictions.items()}
-        # Convert back to probabilities
         max_logit = max(logits.values())
         exp_logits = {k: math.exp(v - max_logit) for k, v in logits.items()}
         total = sum(exp_logits.values())
         predictions = {k: v/total for k, v in exp_logits.items()}
 
-    # Apply top-k filtering
     if top_k > 0:
         sorted_preds = sorted(predictions.items(), key=lambda x: x[1], reverse=True)
         predictions = dict(sorted_preds[:top_k])
-        # Renormalize
         total = sum(predictions.values())
         predictions = {k: v/total for k, v in predictions.items()}
 
-    # Apply top-p (nucleus) filtering
     if top_p < 1.0:
         sorted_preds = sorted(predictions.items(), key=lambda x: x[1], reverse=True)
         cumsum = 0
@@ -615,47 +432,32 @@ def generate_probabilities(prompt, model_name, temperature, top_k, top_p):
             if cumsum >= top_p:
                 break
         predictions = nucleus
-        # Renormalize
         total = sum(predictions.values())
         predictions = {k: v/total for k, v in predictions.items()}
 
-    # Sort by probability
     predictions = dict(sorted(predictions.items(), key=lambda x: x[1], reverse=True))
-
     return predictions
 
-# Calculate entropy
 def calculate_entropy(probabilities):
-    """Calculate Shannon entropy from probability distribution"""
     entropy = 0
     for prob in probabilities.values():
         if prob > 0:
             entropy -= prob * math.log2(prob)
     return entropy
 
-# Calculate perplexity
 def calculate_perplexity(entropy):
-    """Calculate perplexity from entropy"""
     return 2 ** entropy
 
-# Create probability bar chart
 def create_probability_chart(predictions, chart_type="bar"):
-    """Create visualization of token probabilities"""
-
     tokens = list(predictions.keys())[:10]
     probs = [predictions[t] * 100 for t in tokens]
 
-    # Color code by probability
     colors_list = []
     for p in probs:
-        if p > 50:
-            colors_list.append('#28A745')  # Green
-        elif p > 20:
-            colors_list.append('#17A2B8')  # Blue
-        elif p > 5:
-            colors_list.append('#FFC107')  # Orange
-        else:
-            colors_list.append('#6C757D')  # Gray
+        if p > 50: colors_list.append('#28A745')
+        elif p > 20: colors_list.append('#17A2B8')
+        elif p > 5: colors_list.append('#FFC107')
+        else: colors_list.append('#6C757D')
 
     fig = go.Figure(data=[
         go.Bar(
@@ -667,7 +469,6 @@ def create_probability_chart(predictions, chart_type="bar"):
             textposition='outside'
         )
     ])
-
     fig.update_layout(
         title="Top 10 Token Probabilities",
         xaxis_title="Probability (%)",
@@ -676,21 +477,16 @@ def create_probability_chart(predictions, chart_type="bar"):
         showlegend=False,
         yaxis={'categoryorder':'total ascending'}
     )
-
     return fig
 
-# Create word cloud data
 def create_wordcloud_data(predictions):
-    """Prepare data for word cloud visualization"""
     df = pd.DataFrame([
         {'token': token, 'probability': prob * 100}
         for token, prob in list(predictions.items())[:50]
     ])
     return df
 
-# Create entropy chart
 def create_entropy_chart(entropy_values):
-    """Create line chart showing entropy over token positions"""
     fig = go.Figure(data=[
         go.Scatter(
             x=list(range(len(entropy_values))),
@@ -700,77 +496,49 @@ def create_entropy_chart(entropy_values):
             line=dict(width=2, color='#0066CC')
         )
     ])
-
     fig.update_layout(
         title="Entropy Over Token Sequence",
         xaxis_title="Token Position",
         yaxis_title="Entropy (bits)",
         height=400
     )
-
     return fig
 
-# Main application
 def main():
-    # Header
     st.title("🎓 Token Explorer for Educators")
     st.markdown("### Making AI Language Models Accessible to All Learners")
 
-    # Tutorial/Welcome Modal
     if not st.session_state.tutorial_shown:
         with st.expander("👋 Welcome! Click here for a quick tour", expanded=True):
             st.markdown("""
-            **Welcome to Token Explorer for Educators!**
-
-            This tool helps you understand how AI language models work by showing you how they predict the next word in a sentence.
-
-            **Quick Start:**
-            1. 📝 Enter text or load an example prompt
-            2. 🤖 Choose an AI model
-            3. 🎚️ Adjust parameters (temperature, top-k, top-p)
-            4. 🔍 See predictions with probabilities
-            5. 📊 Explore visualizations
-            6. 📤 Export results for your classroom
-
-            **Features:**
-            - 🎯 25 curated example prompts
-            - 📚 Interactive glossary for technical terms
-            - 🏫 5 ready-to-use classroom activities
-            - 📊 Multiple visualization types
-            - 🌍 Multilingual model support
-            - ♿ Full accessibility features
-            - 📝 Quiz generator for assessments
+            **Quick Start**
+            1) Enter text or load an example
+            2) Choose a model
+            3) Adjust temperature/top-k/top-p
+            4) Generate predictions
+            5) Export CSV/PNG/PDF
             """)
-
             if st.button("Got it! Don't show this again"):
                 st.session_state.tutorial_shown = True
                 st.rerun()
 
-    # Top navigation
     col1, col2, col3, col4, col5 = st.columns([2, 2, 2, 1, 1])
-
     with col1:
         if st.button("📖 Glossary"):
             st.session_state.show_glossary = not st.session_state.get('show_glossary', False)
-
     with col2:
         if st.button("❓ Help & Tutorial"):
             st.session_state.show_tutorial = not st.session_state.show_tutorial
-
     with col3:
         st.session_state.poll_mode = st.checkbox("📊 Class Poll Mode", value=st.session_state.poll_mode)
-
     with col4:
         st.session_state.high_contrast = st.checkbox("🌓 High Contrast", value=st.session_state.high_contrast)
-
     with col5:
         st.session_state.font_size = st.selectbox("Font", ["Small", "Medium", "Large"],
-                                                   index=["Small", "Medium", "Large"].index(st.session_state.font_size),
-                                                   label_visibility="collapsed")
-
+                                                  index=["Small", "Medium", "Large"].index(st.session_state.font_size),
+                                                  label_visibility="collapsed")
     st.markdown("---")
 
-    # Show glossary if toggled
     if st.session_state.get('show_glossary', False):
         with st.expander("📖 Glossary of Terms", expanded=True):
             for term, definitions in GLOSSARY.items():
@@ -779,262 +547,124 @@ def main():
                 st.markdown(f"*Detailed:* {definitions['detailed']}")
                 st.markdown("")
 
-    # Main layout: 3 columns
     col_left, col_middle, col_right = st.columns([1, 2, 1])
 
-    # LEFT COLUMN - Input and Model Selection
     with col_left:
         st.markdown("### 📝 Input Text")
-
-        # Example prompt selector
-        category = st.selectbox(
-            "Load Example Prompt",
-            ["-- Select Category --"] + list(EXAMPLE_PROMPTS.keys())
-        )
-
+        category = st.selectbox("Load Example Prompt", ["-- Select Category --"] + list(EXAMPLE_PROMPTS.keys()))
         if category != "-- Select Category --":
             example = st.selectbox("Choose Example", EXAMPLE_PROMPTS[category])
             if st.button("Load This Example"):
                 st.session_state.input_text = example
-
         if st.button("🎲 Random Example"):
             random_category = random.choice(list(EXAMPLE_PROMPTS.keys()))
             st.session_state.input_text = random.choice(EXAMPLE_PROMPTS[random_category])
-
-        # Text input
-        input_text = st.text_area(
-            "Enter your text:",
-            value=st.session_state.get('input_text', ''),
-            height=150,
-            help="Type any sentence or use the examples above"
-        )
-
+        input_text = st.text_area("Enter your text:",
+                                  value=st.session_state.get('input_text', ''),
+                                  height=150)
         st.markdown("### 🤖 Model Selection")
-
-        model_name = st.selectbox(
-            "Choose AI Model",
-            list(MODELS.keys()),
-            help="Different models process text differently"
-        )
-
-        # Show model info
+        model_name = st.selectbox("Choose AI Model", list(MODELS.keys()))
         model_info = MODELS[model_name]
-        st.info(f"""
-        **{model_name}**
-
-        📊 Vocabulary: {model_info['vocab_size']:,} tokens
-
-        🌍 Languages: {', '.join(model_info['languages'][:3])}{'...' if len(model_info['languages']) > 3 else ''}
-
-        ✨ Best for: {model_info['best_for']}
-        """)
-
-        # Model comparison mode
+        st.info(f"**{model_name}**\n\n📊 Vocabulary: {model_info['vocab_size']:,}\n\n🌍 Languages: {', '.join(model_info['languages'][:3])}{'...' if len(model_info['languages'])>3 else ''}\n\n✨ Best for: {model_info['best_for']}")
         compare_models = st.checkbox("🔄 Compare with another model")
         model_name_2 = None
         if compare_models:
-            model_name_2 = st.selectbox(
-                "Second Model",
-                [m for m in MODELS.keys() if m != model_name]
-            )
+            model_name_2 = st.selectbox("Second Model", [m for m in MODELS.keys() if m != model_name])
 
-    # MIDDLE COLUMN - Parameters and Predictions
     with col_middle:
         st.markdown("### 🎚️ Parameters")
-
-        # Parameter presets
         preset_col1, preset_col2, preset_col3 = st.columns(3)
         with preset_col1:
             if st.button("🛡️ Conservative"):
-                st.session_state.temperature = 0.3
-                st.session_state.top_k = 10
-                st.session_state.top_p = 0.8
+                st.session_state.temperature = 0.3; st.session_state.top_k = 10; st.session_state.top_p = 0.8
         with preset_col2:
             if st.button("⚖️ Balanced"):
-                st.session_state.temperature = 0.8
-                st.session_state.top_k = 50
-                st.session_state.top_p = 0.9
+                st.session_state.temperature = 0.8; st.session_state.top_k = 50; st.session_state.top_p = 0.9
         with preset_col3:
             if st.button("🎨 Creative"):
-                st.session_state.temperature = 1.5
-                st.session_state.top_k = 100
-                st.session_state.top_p = 0.95
+                st.session_state.temperature = 1.5; st.session_state.top_k = 100; st.session_state.top_p = 0.95
 
-        # Parameter sliders
-        temperature = st.slider(
-            "🌡️ Temperature (creativity)",
-            min_value=0.0,
-            max_value=2.0,
-            value=st.session_state.get('temperature', 1.0),
-            step=0.1,
-            help=GLOSSARY["Temperature"]["simple"]
-        )
+        temperature = st.slider("🌡️ Temperature", 0.0, 2.0, st.session_state.get('temperature', 1.0), 0.1)
+        top_k = st.slider("🔝 Top-k", 0, 100, st.session_state.get('top_k', 50), 5)
+        top_p = st.slider("🎯 Top-p", 0.0, 1.0, st.session_state.get('top_p', 0.9), 0.05)
 
-        top_k = st.slider(
-            "🔝 Top-k (limit choices)",
-            min_value=0,
-            max_value=100,
-            value=st.session_state.get('top_k', 50),
-            step=5,
-            help=GLOSSARY["Top-k"]["simple"]
-        )
-
-        top_p = st.slider(
-            "🎯 Top-p / Nucleus (dynamic selection)",
-            min_value=0.0,
-            max_value=1.0,
-            value=st.session_state.get('top_p', 0.9),
-            step=0.05,
-            help=GLOSSARY["Top-p (Nucleus)"]["simple"]
-        )
-
-        # Show decoding strategy
         if temperature == 0:
-            strategy = "🔒 Greedy Decoding (always picks most likely)"
+            strategy = "🔒 Greedy Decoding"
         elif top_k > 0 and top_p < 1.0:
-            strategy = f"🎯 Top-k ({top_k}) + Top-p ({top_p}) Sampling"
+            strategy = f"🎯 Top-k ({top_k}) + Top-p ({top_p})"
         elif top_k > 0:
-            strategy = f"🔝 Top-k ({top_k}) Sampling"
+            strategy = f"🔝 Top-k ({top_k})"
         elif top_p < 1.0:
-            strategy = f"🎯 Nucleus (Top-p = {top_p}) Sampling"
+            strategy = f"🎯 Nucleus (Top-p={top_p})"
         else:
             strategy = "🌡️ Temperature Sampling"
-
         st.info(f"**Decoding Strategy:** {strategy}")
 
-        # Generate button
         if st.button("🚀 Generate Predictions", type="primary", use_container_width=True):
             if input_text.strip():
-                # Generate predictions
                 predictions = generate_probabilities(input_text, model_name, temperature, top_k, top_p)
                 st.session_state.predictions = predictions
                 st.session_state.current_model = model_name
                 st.session_state.current_text = input_text
-
-                # If comparing models, generate second set
                 if compare_models and model_name_2:
                     predictions_2 = generate_probabilities(input_text, model_name_2, temperature, top_k, top_p)
                     st.session_state.predictions_2 = predictions_2
                     st.session_state.current_model_2 = model_name_2
-
-                # Calculate metrics
                 entropy = calculate_entropy(predictions)
                 perplexity = calculate_perplexity(entropy)
                 st.session_state.entropy = entropy
                 st.session_state.perplexity = perplexity
             else:
-                st.warning("Please enter some text first!")
+                st.warning("Please enter some text first.")
 
-        # Display predictions
         if 'predictions' in st.session_state:
             st.markdown("---")
             st.markdown("### 🎯 Predictions")
-
-            # Context explanation
             predictions = st.session_state.predictions
             max_prob = max(predictions.values())
-
             if max_prob > 0.5:
-                st.success("✅ **High Confidence**: The model has a clear favorite (>50% probability)")
+                st.success("✅ High confidence (>50%)")
             elif max_prob > 0.2:
-                st.info("ℹ️ **Medium Confidence**: Several likely options (20-50% probability)")
+                st.info("ℹ️ Medium confidence (20–50%)")
             else:
-                st.warning("⚠️ **Low Confidence**: Many equally possible choices (<20% probability)")
+                st.warning("⚠️ Low confidence (<20%)")
 
-            # Display metrics
             metric_col1, metric_col2 = st.columns(2)
             with metric_col1:
-                st.metric(
-                    "📊 Entropy",
-                    f"{st.session_state.entropy:.2f} bits",
-                    help=GLOSSARY["Entropy"]["simple"]
-                )
+                st.metric("📊 Entropy", f"{st.session_state.entropy:.2f} bits")
             with metric_col2:
-                st.metric(
-                    "🎲 Perplexity",
-                    f"{st.session_state.perplexity:.1f}",
-                    help=GLOSSARY["Perplexity"]["simple"]
-                )
+                st.metric("🎲 Perplexity", f"{st.session_state.perplexity:.1f}")
 
-            # Show top predictions
             st.markdown("#### Top 10 Tokens")
-
             if compare_models and 'predictions_2' in st.session_state:
-                # Side-by-side comparison
                 comp_col1, comp_col2 = st.columns(2)
-
                 with comp_col1:
                     st.markdown(f"**{st.session_state.current_model}**")
                     for i, (token, prob) in enumerate(list(predictions.items())[:10], 1):
-                        prob_pct = prob * 100
-                        if prob_pct > 50:
-                            color_class = "probability-high"
-                        elif prob_pct > 20:
-                            color_class = "probability-medium"
-                        elif prob_pct > 5:
-                            color_class = "probability-low"
-                        else:
-                            color_class = "probability-verylow"
-
-                        st.markdown(f"""
-                        <div class="{color_class}">
-                        #{i}: <strong>{token}</strong> — {prob_pct:.1f}%
-                        </div>
-                        """, unsafe_allow_html=True)
-
+                        pct = prob*100
+                        cls = "probability-high" if pct>50 else "probability-medium" if pct>20 else "probability-low" if pct>5 else "probability-verylow"
+                        st.markdown(f'<div class="{cls}">#{i}: <strong>{token}</strong> — {pct:.1f}%</div>', unsafe_allow_html=True)
                 with comp_col2:
                     st.markdown(f"**{st.session_state.current_model_2}**")
-                    predictions_2 = st.session_state.predictions_2
-                    for i, (token, prob) in enumerate(list(predictions_2.items())[:10], 1):
-                        prob_pct = prob * 100
-                        if prob_pct > 50:
-                            color_class = "probability-high"
-                        elif prob_pct > 20:
-                            color_class = "probability-medium"
-                        elif prob_pct > 5:
-                            color_class = "probability-low"
-                        else:
-                            color_class = "probability-verylow"
-
-                        st.markdown(f"""
-                        <div class="{color_class}">
-                        #{i}: <strong>{token}</strong> — {prob_pct:.1f}%
-                        </div>
-                        """, unsafe_allow_html=True)
+                    for i, (token, prob) in enumerate(list(st.session_state.predictions_2.items())[:10], 1):
+                        pct = prob*100
+                        cls = "probability-high" if pct>50 else "probability-medium" if pct>20 else "probability-low" if pct>5 else "probability-verylow"
+                        st.markdown(f'<div class="{cls}">#{i}: <strong>{token}</strong> — {pct:.1f}%</div>', unsafe_allow_html=True)
             else:
-                # Single model display
                 for i, (token, prob) in enumerate(list(predictions.items())[:10], 1):
-                    prob_pct = prob * 100
-                    if prob_pct > 50:
-                        color_class = "probability-high"
-                    elif prob_pct > 20:
-                        color_class = "probability-medium"
-                    elif prob_pct > 5:
-                        color_class = "probability-low"
-                    else:
-                        color_class = "probability-verylow"
+                    pct = prob*100
+                    cls = "probability-high" if pct>50 else "probability-medium" if pct>20 else "probability-low" if pct>5 else "probability-verylow"
+                    st.markdown(f'<div class="{cls}">#{i}: <strong>{token}</strong> — {pct:.1f}%</div>', unsafe_allow_html=True)
 
-                    st.markdown(f"""
-                    <div class="{color_class}">
-                    #{i}: <strong>{token}</strong> — {prob_pct:.1f}%
-                    </div>
-                    """, unsafe_allow_html=True)
-
-            # Visualizations
             st.markdown("---")
             st.markdown("### 📊 Visualizations")
-
-            viz_tab1, viz_tab2, viz_tab3 = st.tabs([
-                "📊 Probability Chart",
-                "☁️ Word Cloud Data",
-                "📈 Metrics Analysis"
-            ])
+            viz_tab1, viz_tab2, viz_tab3 = st.tabs(["📊 Probability Chart", "☁️ Word Cloud Data", "📈 Metrics Analysis"])
 
             with viz_tab1:
                 fig = create_probability_chart(predictions)
                 st.plotly_chart(fig, use_container_width=True)
 
-                # Optional inline download for this single chart
+                # Real PNG export using plotly.io.to_image + st.download_button
                 try:
                     png_bytes_inline = export_chart_png(fig)
                     st.download_button(
@@ -1044,81 +674,45 @@ def main():
                         mime="image/png"
                     )
                 except Exception as e:
-                    st.warning(f"Inline chart export failed: {e}")
+                    st.warning(f"Chart export failed: {e}")
 
             with viz_tab2:
                 df = create_wordcloud_data(predictions)
                 st.dataframe(df, use_container_width=True)
-
-                # Simple bar chart as word cloud alternative
-                fig2 = px.bar(
-                    df.head(20),
-                    x='probability',
-                    y='token',
-                    orientation='h',
-                    title="Token Probability Distribution (Top 20)"
-                )
+                fig2 = px.bar(df.head(20), x='probability', y='token', orientation='h', title="Token Probability Distribution (Top 20)")
                 st.plotly_chart(fig2, use_container_width=True)
 
             with viz_tab3:
                 st.markdown(f"""
                 **Model Confidence Metrics**
-
-                - **Entropy**: {st.session_state.entropy:.2f} bits
-                  - Lower entropy = more predictable
-                  - Higher entropy = more uncertain
-
-                - **Perplexity**: {st.session_state.perplexity:.1f}
-                  - Equivalent to choosing from ~{int(st.session_state.perplexity)} equally likely options
-                  - Lower is better (more confident)
-
-                - **Top Token Probability**: {max(predictions.values())*100:.1f}%
-                  - How confident the model is in its top choice
+                - Entropy: {st.session_state.entropy:.2f} bits
+                - Perplexity: {st.session_state.perplexity:.1f}
+                - Top Token Probability: {max(predictions.values())*100:.1f}%
                 """)
 
-    # RIGHT COLUMN - Activities and Export
     with col_right:
         st.markdown("### 🏫 Classroom Activities")
-
-        activity_name = st.selectbox(
-            "Choose Activity",
-            ["-- Select Activity --"] + list(ACTIVITIES.keys())
-        )
-
+        activity_name = st.selectbox("Choose Activity", ["-- Select Activity --"] + list(ACTIVITIES.keys()))
         if activity_name != "-- Select Activity --":
             activity = ACTIVITIES[activity_name]
-
             with st.expander(f"📋 {activity_name}", expanded=True):
-                st.markdown(f"""
-                **Grade Level**: {activity['grade_level']}  
-                **Duration**: {activity['duration']}
-
-                **Description**: {activity['description']}
-
-                **Steps**:
-                """)
+                st.markdown(f"**Grade Level**: {activity['grade_level']}  \n**Duration**: {activity['duration']}")
+                st.markdown(f"**Description**: {activity['description']}")
+                st.markdown("**Steps:**")
                 for i, step in enumerate(activity['steps'], 1):
                     st.markdown(f"{i}. {step}")
-
-                st.markdown("**Learning Goals**:")
+                st.markdown("**Learning Goals:**")
                 for goal in activity['learning_goals']:
                     st.markdown(f"- {goal}")
-
-                if st.button("🎯 Configure Tool for This Activity"):
-                    st.success("Tool configured! Try using the suggested prompts and settings.")
-
-                if st.button("🖨️ Print Activity Handout"):
-                    st.info("Handout ready for printing!")
 
         st.markdown("---")
         st.markdown("### 📤 Export Options")
 
-        # Build a chart now if predictions exist so both exports share it
         current_fig = None
         if 'predictions' in st.session_state:
             current_fig = create_probability_chart(st.session_state.predictions)
 
-        # IMAGE EXPORT (PNG)
+        # Real PNG export button for the current chart
         if 'predictions' in st.session_state and current_fig is not None:
             try:
                 png_bytes = export_chart_png(current_fig)
@@ -1132,7 +726,7 @@ def main():
             except Exception as e:
                 st.warning(f"Image export failed: {e}")
 
-        # CSV EXPORT
+        # CSV export
         if 'predictions' in st.session_state:
             df = pd.DataFrame([
                 {
@@ -1155,7 +749,7 @@ def main():
                 use_container_width=True
             )
 
-        # PDF EXPORT
+        # PDF export
         if 'predictions' in st.session_state:
             try:
                 pdf_bytes = generate_pdf_report(
@@ -1187,103 +781,73 @@ def main():
 
         st.markdown("---")
         st.markdown("### 🎓 Standards Alignment")
-
         with st.expander("📚 View Standards"):
             st.markdown("""
-            **CSTA K-12 CS Standards:**
-            - 1B-AP-15: Test and debug algorithms
-            - 3A-IC-24: Evaluate computational artifacts for bias
-            - 3B-AP-08: Describe how AI and ML algorithms work
+            **CSTA K-12 CS Standards**
+            - 1B-AP-15, 3A-IC-24, 3B-AP-08
 
-            **ISTE Standards for Students:**
-            - 1.6.d: Students understand how AI makes decisions
-            - 1.1.c: Students use technology for creative expression
+            **ISTE Standards for Students**
+            - 1.6.d, 1.1.c
 
-            **Common Core Math:**
-            - HSS-IC.A.2: Analyze decisions using probability
-            - 7.SP.C.7: Develop probability models
+            **Common Core Math**
+            - HSS-IC.A.2, 7.SP.C.7
             """)
 
-    # Poll Mode Section
     if st.session_state.poll_mode:
         st.markdown("---")
         st.markdown("## 📊 Class Poll Mode")
-
         poll_col1, poll_col2 = st.columns(2)
-
         with poll_col1:
             st.markdown("### 👥 Student Submissions")
             st.markdown(f"**Join Code**: POLL-{random.randint(1000, 9999)}")
-            st.markdown("*Students: Enter your prediction for the next word*")
-
             student_guess = st.text_input("Your prediction:", key="student_guess")
             if st.button("Submit Prediction"):
                 if student_guess:
                     st.session_state.student_predictions.append(student_guess.lower())
                     st.success("Prediction submitted!")
-
             st.metric("Total Submissions", len(st.session_state.student_predictions))
-
             if st.button("🗑️ Clear All Predictions"):
                 st.session_state.student_predictions = []
                 st.rerun()
-
         with poll_col2:
             st.markdown("### 📊 Results Comparison")
-
             if st.session_state.student_predictions and 'predictions' in st.session_state:
-                # Count student predictions
                 student_counts = Counter(st.session_state.student_predictions)
                 total_students = len(st.session_state.student_predictions)
-
-                # Top 5 student predictions
                 st.markdown("**Top Student Predictions:**")
                 for word, count in student_counts.most_common(5):
                     pct = (count / total_students) * 100
                     st.markdown(f"- **{word}**: {count} votes ({pct:.0f}%)")
-
                 st.markdown("**Top AI Predictions:**")
                 for token, prob in list(st.session_state.predictions.items())[:5]:
                     st.markdown(f"- **{token}**: {prob*100:.1f}%")
-
-                # Check agreement
                 top_student = student_counts.most_common(1)[0][0] if student_counts else None
                 top_ai = list(st.session_state.predictions.keys())[0]
-
                 if top_student == top_ai:
-                    st.success(f"✅ **Agreement!** Both chose '{top_student}'")
+                    st.success(f"✅ Agreement on '{top_student}'")
                 else:
-                    st.info(f"🤔 **Different choices**: Students picked '{top_student}', AI picked '{top_ai}'")
+                    st.info(f"🤔 Students: '{top_student}' vs AI: '{top_ai}'")
 
-    # Quiz Section
     if st.session_state.get('show_quiz', False):
         st.markdown("---")
         st.markdown("## 📝 Quick Knowledge Check")
-
         for i, q in enumerate(QUIZ_QUESTIONS):
             st.markdown(f"**Question {i+1}: {q['question']}**")
-            answer = st.radio(
-                "Select your answer:",
-                q['options'],
-                key=f"quiz_{i}"
-            )
-
+            answer = st.radio("Select your answer:", q['options'], key=f"quiz_{i}")
             if st.button(f"Check Answer #{i+1}"):
                 if q['options'].index(answer) == q['correct']:
                     st.success(f"✅ Correct! {q['explanation']}")
                 else:
                     st.error(f"❌ Not quite. {q['explanation']}")
-
         if st.button("Close Quiz"):
             st.session_state.show_quiz = False
             st.rerun()
 
-    # Footer
     st.markdown("---")
     st.markdown("""
     <div style='text-align: center; color: #6C757D; padding: 20px;'>
-    <p><strong>Token Explorer for Educators</strong> | Version 2.0 | November 2025</p>
-    <p>Making AI Accessible to All Learners | Built for Educators</p>
+      <p><strong>Token Explorer for Educators</strong> | Version 2.0 | November 2025</p>
+      <p>Making AI Accessible to All Learners</p>
     </div>
     """, unsafe_allow_html=True)
 
