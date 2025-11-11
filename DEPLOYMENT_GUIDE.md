@@ -11,7 +11,7 @@ pip install -r requirements.txt
 ### 2. Run the Application
 
 ```bash
-streamlit run token_explorer_app.py
+streamlit run app.py
 ```
 
 The app will open in your browser at `http://localhost:8501`
@@ -24,7 +24,7 @@ The app will open in your browser at `http://localhost:8501`
 
 1. **Create a GitHub repository** (public or private)
 2. **Upload these files**:
-   - `token_explorer_app.py` (main application)
+   - `app.py` (main application)
    - `requirements.txt` (dependencies)
    - `README.md` (optional documentation)
 
@@ -36,7 +36,7 @@ The app will open in your browser at `http://localhost:8501`
 4. **Select**:
    - Repository: `your-username/token-explorer`
    - Branch: `main`
-   - Main file path: `token_explorer_app.py`
+   - Main file path: `app.py`
 5. **Click "Deploy"**
 
 Your app will be live at: `https://your-app-name.streamlit.app`
@@ -55,7 +55,7 @@ git push heroku main
 
 Create `Procfile`:
 ```
-web: streamlit run token_explorer_app.py --server.port=$PORT
+web: streamlit run app.py --server.port=$PORT
 ```
 
 ### Option 2: Google Cloud Run
@@ -75,7 +75,7 @@ gcloud run deploy token-explorer \
 sudo apt update
 sudo apt install python3-pip
 pip3 install -r requirements.txt
-streamlit run token_explorer_app.py --server.port 80
+streamlit run app.py --server.port 80
 ```
 
 ### Option 4: Docker
@@ -86,9 +86,9 @@ FROM python:3.9-slim
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt
-COPY token_explorer_app.py .
+COPY app.py .
 EXPOSE 8501
-CMD ["streamlit", "run", "token_explorer_app.py"]
+CMD ["streamlit", "run", "app.py"]
 ```
 
 Build and run:
@@ -131,67 +131,47 @@ export STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
 
 ---
 
-## 📊 Features Included
+## 📊 Feature Highlights
 
-### ✅ All Requested Features Implemented:
-
-1. **Guided Tutorials**
-   - Welcome modal with 6-step tour
-   - Contextual tooltips for all terms
-   - Interactive glossary panel
+1. **Guided Onboarding**
+   - Quick start walkthrough
+   - Interactive glossary with educator-friendly language
 
 2. **Curated Examples**
-   - 25 example prompts in 5 categories
-   - Random example generator
-   - Category-based selection
+   - 25 prompts across five classroom themes
+   - Random prompt generator for instant variety
 
 3. **Contextual Explanations**
-   - Dynamic confidence indicators
-   - Color-coded predictions
-   - Educational pop-ups
+   - Color-coded probability badges
+   - Real-time entropy and perplexity indicators
 
-4. **Multiple Models**
-   - 5 AI model options
-   - Model comparison mode
-   - Multilingual support
+4. **Model Options & Controls**
+   - Five simulated model profiles (including multilingual)
+   - Temperature, Top-k, and Top-p sliders with presets
 
-5. **Advanced Parameters**
-   - Temperature, Top-k, Top-p sliders
-   - Preset configurations
-   - Decoding strategy display
+5. **Class Poll Mode**
+   - Collect student guesses anonymously
+   - Human vs AI comparison table and grouped bar chart
 
-6. **Class Poll Mode**
-   - Live student submissions
-   - Anonymous voting
-   - Results comparison
+6. **Visual Analytics**
+   - Plotly probability chart
+   - Ranked token table with CSV export
+   - Confidence tracking timeline
 
-7. **Enhanced Visualizations**
-   - Probability bar charts
-   - Word cloud data
-   - Entropy/perplexity metrics
+7. **Lightweight Exports**
+   - CSV download of token probabilities
+   - Text summaries for predictions and activities
 
-8. **Export Options**
-   - PDF export (simulated)
-   - CSV download (functional)
-   - Image export (simulated)
+8. **Accessibility**
+   - High-contrast mode
+   - Adjustable font sizing
+   - Large tap targets and ARIA-friendly markup
 
-9. **Accessibility**
-   - High contrast mode
-   - Font size controls
-   - Keyboard navigation
-   - WCAG 2.1 compliant
+9. **Classroom Activities**
+   - Two ready-to-use activity outlines
+   - Downloadable text handouts for quick printing
 
-10. **Classroom Activities**
-    - 5 ready-to-use activities
-    - Grade-level appropriate
-    - Printable handouts
-
-11. **Quiz Generation**
-    - 4 knowledge check questions
-    - Auto-graded responses
-    - Explanations included
-
-12. **Standards Alignment**
+10. **Standards Alignment**
     - CSTA K-12 CS Standards
     - ISTE Standards
     - Common Core Math
@@ -205,17 +185,16 @@ export STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
 1. **Lesson Planning**:
    - Review classroom activities
    - Load example prompts
-   - Export materials as PDF/CSV
+   - Download summaries as CSV or TXT
 
 2. **Live Demonstrations**:
    - Enable Class Poll Mode
    - Project on classroom screen
    - Compare student vs. AI predictions
 
-3. **Assessment**:
-   - Use built-in quiz generator
-   - Export results for grading
-   - Track student understanding
+3. **Assessment & Reflection**:
+   - Discuss entropy/perplexity trends
+   - Encourage student reflection via downloads
 
 ### For Students:
 
@@ -229,10 +208,10 @@ export STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
    - Compare with classmates
    - Discuss AI behavior
 
-3. **Assessment**:
-   - Take knowledge check quizzes
-   - Get instant feedback
-   - Review explanations
+3. **Assessment & Reflection**:
+   - Review confidence tracking data
+   - Compare human vs AI results
+   - Reflect on prediction strategies
 
 ---
 
@@ -250,7 +229,7 @@ pip install -r requirements.txt
 **2. Port already in use**
 ```bash
 # Use a different port
-streamlit run token_explorer_app.py --server.port 8502
+streamlit run app.py --server.port 8502
 ```
 
 **3. Plotly charts not rendering**
@@ -270,7 +249,7 @@ streamlit cache clear
 
 ### Key Files:
 
-- `token_explorer_app.py` - Main application (40KB+)
+- `app.py` - Main application (~40KB)
 - `requirements.txt` - Python dependencies
 - `README.md` - This deployment guide
 

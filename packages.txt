@@ -1,10 +1,1 @@
-chromium
-fonts-liberation
-libnss3
-libasound2
-libxkbcommon0
-libxcomposite1
-libxdamage1
-libxrandr2
-libgbm1
-libgtk-3-0
+# No additional system packages required.
