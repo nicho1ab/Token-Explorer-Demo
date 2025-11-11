@@ -1,14 +1,14 @@
 """
 Token Explorer for Educators - Streamlit Application
-Accessibility + Cloud export build:
+Performance + Accessibility build:
+- Cached Kaleido/Chromium configuration for Plotly image export
+- Heavy renders (PNG, PDF, Word Cloud) gated behind buttons
+- Cached asset generation keyed by prompt+params hash
 - High-contrast theme toggle with dynamic CSS
 - Global font-size control via CSS on <html>
 - ARIA roles and labels on custom HTML (glossary items, probability badges)
-- Word Cloud Visualization (wordcloud)
 - Human vs AI Visualization (grouped bar)
 - Confidence Tracking: Continue One Token loop
-- Printable Activity Handouts (PDF via reportlab)
-- Chart export via plotly.io.to_image (kaleido), auto-configured for Streamlit Cloud
 
 Run: streamlit run app.py
 """
@@ -17,20 +17,22 @@ import os
 import shutil
 import random
 import math
+import hashlib
 from datetime import datetime
 from collections import Counter
 from io import BytesIO
 
 import streamlit as st
 import pandas as pd
-import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 import plotly.io as pio
 
-# Configure Kaleido to find headless Chrome/Chromium in Streamlit Cloud
-def _configure_kaleido_chrome():
-    # Prefer explicit env var if set via Streamlit Secrets or environment
+# ---------------------------------------------------------------------
+# Cached Kaleido/Chromium configuration for Streamlit Cloud
+# ---------------------------------------------------------------------
+@st.cache_resource(show_spinner=False)
+def configure_kaleido():
     env_path = os.environ.get("PLOTLY_CHROME_PATH")
     candidates = [
         env_path,
@@ -44,33 +46,39 @@ def _configure_kaleido_chrome():
     for c in candidates:
         if c and os.path.exists(c):
             try:
-                # pio.kaleido is initialized lazily; accessing scope creates it
                 pio.kaleido.scope.chromium_path = c
-                return
+                return c
             except Exception:
-                pass
-    # Optional: last-ditch attempt to fetch a portable Chrome if available
+                continue
+    # Optional fallback to plotly_get_chrome if available
     try:
         import subprocess
         subprocess.run(["plotly_get_chrome"], check=True)
         c2 = shutil.which("google-chrome") or shutil.which("chromium") or "/usr/bin/google-chrome"
         if c2 and os.path.exists(c2):
             pio.kaleido.scope.chromium_path = c2
+            return c2
     except Exception:
-        # No hard failure here. UI try/except around to_image will surface errors.
         pass
+    return None
 
-_configure_kaleido_chrome()
+_ = configure_kaleido()
 
-# PDF generation
-from reportlab.lib.pagesizes import LETTER
-from reportlab.lib import colors
-from reportlab.pdfgen import canvas as rl_canvas
-from reportlab.lib.units import inch
-from reportlab.platypus import Table, TableStyle
+# ---------------------------------------------------------------------
+# Lazy imports for heavy libs to reduce cold start
+# ---------------------------------------------------------------------
+def _lazy_reportlab():
+    from reportlab.lib.pagesizes import LETTER
+    from reportlab.lib import colors
+    from reportlab.pdfgen import canvas as rl_canvas
+    from reportlab.lib.units import inch
+    from reportlab.platypus import Table, TableStyle
+    return LETTER, colors, rl_canvas, inch, Table, TableStyle
 
-# Word cloud
-from wordcloud import WordCloud
+def _lazy_wordcloud():
+    from wordcloud import WordCloud
+    from PIL import Image
+    return WordCloud
 
 # ---------------------------------------------------------------------
 # Page config and base CSS
@@ -95,7 +103,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------
-# Glossary and content
+# Content
 # ---------------------------------------------------------------------
 GLOSSARY = {
     "Token": {"simple": "A piece of text the model sees: a word, part of a word, or punctuation.",
@@ -208,12 +216,6 @@ ACTIVITIES = {
     }
 }
 
-QUIZ_QUESTIONS = [
-    {"question": "What does 'temperature' control in a language model?",
-     "options": ["Speed", "Creativity vs predictability", "CPU heat", "Vocabulary size"],
-     "correct": 1, "explanation": "Temperature scales randomness. Low = predictable, high = diverse."}
-]
-
 # ---------------------------------------------------------------------
 # Probability and metrics
 # ---------------------------------------------------------------------
@@ -310,12 +312,6 @@ def create_probability_chart(predictions):
     )
     return fig
 
-def create_wordcloud_data(predictions):
-    # For optional table under the word cloud
-    return pd.DataFrame(
-        [{'token': t, 'probability': p*100} for t, p in list(predictions.items())[:50]]
-    )
-
 def create_entropy_chart(entropy_values):
     if not entropy_values:
         fig = go.Figure()
@@ -338,38 +334,37 @@ def create_entropy_chart(entropy_values):
     return fig
 
 # ---------------------------------------------------------------------
-# Exports: Chart PNG + Prediction PDF
+# Hashing and cached heavy renders
 # ---------------------------------------------------------------------
-def export_chart_png(fig) -> bytes:
-    if fig is None:
-        return b""
-    return pio.to_image(fig, format="png", width=1200, height=700, scale=2)
+def _hash_key(prompt: str, model: str, temperature: float, top_k: int, top_p: float, predictions: dict) -> str:
+    base = f"{prompt}|{model}|{temperature:.3f}|{top_k}|{top_p:.3f}|" + ";".join(f"{k}:{predictions[k]:.8f}" for k in sorted(predictions.keys()))
+    return hashlib.sha1(base.encode()).hexdigest()
 
-def _build_top_tokens_table_data(predictions: dict, top_n: int = 10):
-    rows = [["Rank", "Token", "Probability"]]
-    for i, (tok, p) in enumerate(list(predictions.items())[:top_n], start=1):
-        rows.append([i, tok, f"{p*100:.2f}%"])
-    return rows
+@st.cache_data(show_spinner=False)
+def render_chart_png_cached(fig_dict: dict, width=1000, height=600, scale=1) -> bytes:
+    fig = go.Figure(fig_dict)
+    return pio.to_image(fig, format="png", width=width, height=height, scale=scale)
 
-def _draw_wrapped_text(c, text, x, y, max_width, line_height=14, font_name="Helvetica", font_size=10):
-    c.setFont(font_name, font_size)
-    words = text.split()
-    line = ""
-    while words:
-        w = words[0]
-        test = f"{line} {w}".strip()
-        if c.stringWidth(test, font_name, font_size) <= max_width:
-            line = test; words.pop(0)
-        else:
-            c.drawString(x, y, line); y -= line_height; line = ""
-    if line:
-        c.drawString(x, y, line); y -= line_height
-    return y
+@st.cache_data(show_spinner=False)
+def render_wordcloud_png_cached(predictions: dict, width=800, height=400) -> bytes:
+    WordCloud = _lazy_wordcloud()
+    wc = WordCloud(width=width, height=height, background_color='white')
+    wc.generate_from_frequencies(predictions)
+    from PIL import Image
+    img = Image.fromarray(wc.to_array())
+    bio = BytesIO()
+    img.save(bio, format="PNG")
+    bio.seek(0)
+    return bio.read()
 
-def generate_pdf_report(prompt_text: str, params: dict, metrics: dict, predictions: dict, fig) -> bytes:
+@st.cache_data(show_spinner=False)
+def render_prediction_pdf_cached(prompt_text: str, params: dict, metrics: dict, predictions: dict, fig_dict: dict | None) -> bytes:
+    LETTER, colors, rl_canvas, inch, Table, TableStyle = _lazy_reportlab()
+    # Recreate chart PNG only if fig_dict provided
     chart_png = None
-    if fig is not None:
-        chart_png = pio.to_image(fig, format="png", width=1200, height=700, scale=2)
+    if fig_dict:
+        fig = go.Figure(fig_dict)
+        chart_png = pio.to_image(fig, format="png", width=1000, height=600, scale=1)
 
     buf = BytesIO()
     c = rl_canvas.Canvas(buf, pagesize=LETTER)
@@ -378,6 +373,29 @@ def generate_pdf_report(prompt_text: str, params: dict, metrics: dict, predictio
     x = margin
     y = height - margin
 
+    # Helpers
+    def _draw_wrapped_text(text, x_, y_, max_width, line_height=14, font_name="Helvetica", font_size=10):
+        c.setFont(font_name, font_size)
+        words = text.split()
+        line = ""
+        while words:
+            w = words[0]
+            test = f"{line} {w}".strip()
+            if c.stringWidth(test, font_name, font_size) <= max_width:
+                line = test; words.pop(0)
+            else:
+                c.drawString(x_, y_, line); y_ -= line_height; line = ""
+        if line:
+            c.drawString(x_, y_, line); y_ -= line_height
+        return y_
+
+    def _build_top_tokens_table_data(preds: dict, top_n: int = 10):
+        rows = [["Rank", "Token", "Probability"]]
+        for i, (tok, p) in enumerate(list(preds.items())[:top_n], start=1):
+            rows.append([i, tok, f"{p*100:.2f}%"])
+        return rows
+
+    # Header
     c.setTitle("Token Explorer Report")
     c.setFont("Helvetica-Bold", 16); c.drawString(x, y, "Token Explorer for Educators — Prediction Report")
     y -= 18
@@ -386,9 +404,11 @@ def generate_pdf_report(prompt_text: str, params: dict, metrics: dict, predictio
     c.setFillColor(colors.black); y -= 22
     c.line(x, y, width - margin, y); y -= 18
 
+    # Prompt
     c.setFont("Helvetica-Bold", 12); c.drawString(x, y, "Input Prompt:"); y -= 16
-    y = _draw_wrapped_text(c, prompt_text or "(none)", x, y, max_width=width - 2*margin, font_size=11)
+    y = _draw_wrapped_text(prompt_text or "(none)", x, y, max_width=width - 2*margin, font_size=11)
 
+    # Params
     y -= 6
     c.setFont("Helvetica-Bold", 12); c.drawString(x, y, "Parameters:"); y -= 16
     c.setFont("Helvetica", 11)
@@ -400,6 +420,7 @@ def generate_pdf_report(prompt_text: str, params: dict, metrics: dict, predictio
     ]:
         c.drawString(x, y, line); y -= 14
 
+    # Metrics
     y -= 6
     c.setFont("Helvetica-Bold", 12); c.drawString(x, y, "Metrics:"); y -= 16
     c.setFont("Helvetica", 11)
@@ -411,6 +432,7 @@ def generate_pdf_report(prompt_text: str, params: dict, metrics: dict, predictio
     for line in m_lines:
         c.drawString(x, y, line); y -= 14
 
+    # Table
     y -= 10
     c.setFont("Helvetica-Bold", 12); c.drawString(x, y, "Top-10 Tokens:"); y -= 16
     table_data = _build_top_tokens_table_data(predictions or {}, 10)
@@ -434,6 +456,7 @@ def generate_pdf_report(prompt_text: str, params: dict, metrics: dict, predictio
     tbl.drawOn(c, x, y - (14 * len(table_data)))
     y -= (14 * len(table_data) + 18)
 
+    # Chart
     if chart_png:
         if y < margin + 220:
             c.showPage(); y = height - margin
@@ -446,16 +469,30 @@ def generate_pdf_report(prompt_text: str, params: dict, metrics: dict, predictio
     c.showPage(); c.save(); buf.seek(0)
     return buf.read()
 
-# ---------------------------------------------------------------------
-# Activity Handout PDF generator
-# ---------------------------------------------------------------------
-def generate_activity_handout_pdf(activity_title: str, activity: dict) -> bytes:
+@st.cache_data(show_spinner=False)
+def render_handout_pdf_cached(activity_title: str, activity: dict) -> bytes:
+    LETTER, colors, rl_canvas, inch, Table, TableStyle = _lazy_reportlab()
     buf = BytesIO()
     c = rl_canvas.Canvas(buf, pagesize=LETTER)
     width, height = LETTER
     margin = 0.75 * inch
     x = margin
     y = height - margin
+
+    def _draw_wrapped_text(text, x_, y_, max_width, line_height=14, font_name="Helvetica", font_size=10):
+        c.setFont(font_name, font_size)
+        words = text.split()
+        line = ""
+        while words:
+            w = words[0]
+            test = f"{line} {w}".strip()
+            if c.stringWidth(test, font_name, font_size) <= max_width:
+                line = test; words.pop(0)
+            else:
+                c.drawString(x_, y_, line); y_ -= line_height; line = ""
+        if line:
+            c.drawString(x_, y_, line); y_ -= line_height
+        return y_
 
     c.setTitle(f"{activity_title} - Handout")
     c.setFont("Helvetica-Bold", 18); c.drawString(x, y, activity_title)
@@ -473,14 +510,14 @@ def generate_activity_handout_pdf(activity_title: str, activity: dict) -> bytes:
     y -= 6
     c.setFont("Helvetica-Bold", 12); c.drawString(x, y, "Description:")
     y -= 16
-    y = _draw_wrapped_text(c, activity.get("description",""), x, y, max_width=width - 2*margin, font_size=11)
+    y = _draw_wrapped_text(activity.get("description",""), x, y, max_width=width - 2*margin, font_size=11)
 
     y -= 8
     c.setFont("Helvetica-Bold", 12); c.drawString(x, y, "Steps:")
     y -= 16
     c.setFont("Helvetica", 11)
     for idx, step in enumerate(activity.get("steps", []), start=1):
-        y = _draw_wrapped_text(c, f"{idx}. {step}", x, y, max_width=width - 2*margin, font_size=11)
+        y = _draw_wrapped_text(f"{idx}. {step}", x, y, max_width=width - 2*margin, font_size=11)
         y -= 2
         if y < margin + 120:
             c.showPage(); y = height - margin
@@ -491,7 +528,7 @@ def generate_activity_handout_pdf(activity_title: str, activity: dict) -> bytes:
     c.setFont("Helvetica-Bold", 12); c.drawString(x, y, "Learning Goals:")
     y -= 16; c.setFont("Helvetica", 11)
     for goal in activity.get("learning_goals", []):
-        y = _draw_wrapped_text(c, f"• {goal}", x, y, max_width=width - 2*margin, font_size=11)
+        y = _draw_wrapped_text(f"• {goal}", x, y, max_width=width - 2*margin, font_size=11)
         y -= 2
         if y < margin + 80:
             c.showPage(); y = height - margin
@@ -516,7 +553,7 @@ def _ensure_state_defaults():
     st.session_state.setdefault('poll_mode', False)
     st.session_state.setdefault('student_predictions', [])
 
-    # Accessibility toggles
+    # Accessibility
     st.session_state.setdefault('high_contrast', False)
     st.session_state.setdefault('font_size', 'Medium')  # Small / Medium / Large
 
@@ -541,14 +578,12 @@ def _ensure_state_defaults():
 _ensure_state_defaults()
 
 # ---------------------------------------------------------------------
-# Dynamic style injection for High-Contrast and Font-Size
+# Dynamic style injection
 # ---------------------------------------------------------------------
 def apply_dynamic_styles():
-    # Font size map
     font_map = {"Small": "14px", "Medium": "16px", "Large": "18px"}
     base_size = font_map.get(st.session_state.get("font_size", "Medium"), "16px")
 
-    # Start style with global font size
     css_parts = [f"""
     <style>
       html {{ font-size: {base_size}; }}
@@ -559,10 +594,8 @@ def apply_dynamic_styles():
       .stButton>button, .stDownloadButton>button {{ font-size: 1rem; }}
     """]
 
-    # High-contrast theme
     if st.session_state.get("high_contrast", False):
         css_parts.append("""
-        /* High-contrast palette */
         html, body { background-color: #000000 !important; color: #FFFFFF !important; }
         .stApp, .block-container { background-color: #000000 !important; }
         h1, h2, h3, h4, h5, h6, p, li, label, span, div { color: #FFFFFF !important; }
@@ -573,9 +606,7 @@ def apply_dynamic_styles():
         .stTextInput>div>div>input, .stTextArea textarea, .stSelectbox div[role="combobox"] {
             background-color: #111111 !important; color: #FFFFFF !important; border: 1px solid #FFFFFF !important;
         }
-        /* Tables and dataframes */
         .stDataFrame, .dataframe, .stTable { filter: invert(1) hue-rotate(180deg); }
-        /* Probability badges tuned for contrast */
         .probability-high { background-color: #00A65A !important; color: #FFFFFF !important; }
         .probability-medium { background-color: #148EA1 !important; color: #FFFFFF !important; }
         .probability-low { background-color: #C19A00 !important; color: #111111 !important; }
@@ -585,7 +616,7 @@ def apply_dynamic_styles():
     st.markdown("\n".join(css_parts), unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------
-# Accessible HTML render helpers
+# Accessible HTML helpers
 # ---------------------------------------------------------------------
 def render_probability_badge(rank: int, token: str, prob: float) -> str:
     pct = prob * 100
@@ -593,7 +624,6 @@ def render_probability_badge(rank: int, token: str, prob: float) -> str:
     elif pct > 20: cls = "probability-medium"
     elif pct > 5: cls = "probability-low"
     else: cls = "probability-verylow"
-    # role="note" for descriptive chip. aria-label fully describes the item.
     label = f"Rank {rank}. Token {token}. Probability {pct:.1f} percent."
     return (
         f'<div class="{cls}" role="note" aria-label="{label}" aria-live="polite">'
@@ -602,7 +632,6 @@ def render_probability_badge(rank: int, token: str, prob: float) -> str:
     )
 
 def render_glossary_item(term: str, simple: str, detailed: str) -> str:
-    # Use a list item structure with roles
     term_id = f"glossary-{term.replace(' ', '-').lower()}"
     return f"""
     <section role="listitem" aria-labelledby="{term_id}">
@@ -613,7 +642,7 @@ def render_glossary_item(term: str, simple: str, detailed: str) -> str:
     """
 
 # ---------------------------------------------------------------------
-# Main UI
+# Main
 # ---------------------------------------------------------------------
 def main():
     st.title("🎓 Token Explorer for Educators")
@@ -629,7 +658,7 @@ def main():
 5) Use **Continue One Token** to step and track entropy  
 6) Use **Class Poll Mode** for Human vs AI visualization  
 7) Print **Activity Handouts** for the classroom  
-8) Use **High Contrast** and **Font** controls for accessibility
+8) Exports render on demand to keep the app fast
             """)
             if st.button("Got it"):
                 st.session_state.tutorial_shown = True
@@ -652,9 +681,7 @@ def main():
                                                   index=["Small","Medium","Large"].index(st.session_state.font_size),
                                                   label_visibility="collapsed")
 
-    # Apply dynamic styles after toggles change
     apply_dynamic_styles()
-
     st.markdown("---")
 
     if st.session_state.show_glossary:
@@ -699,20 +726,35 @@ def main():
         if compare_models:
             model_name_2 = st.selectbox("Second Model", [m for m in MODELS.keys() if m != model_name])
 
-    # Middle: parameters + predictions + confidence tracking
+    # Middle: Parameters inside a form to reduce reruns
     with col_mid:
         st.markdown("### 🎚️ Parameters")
-        p1, p2, p3 = st.columns(3)
-        with p1:
-            if st.button("🛡️ Conservative"): st.session_state.update(temperature=0.3, top_k=10, top_p=0.8)
-        with p2:
-            if st.button("⚖️ Balanced"): st.session_state.update(temperature=0.8, top_k=50, top_p=0.9)
-        with p3:
-            if st.button("🎨 Creative"): st.session_state.update(temperature=1.5, top_k=100, top_p=0.95)
+        with st.form("params_form", clear_on_submit=False):
+            p1, p2, p3 = st.columns(3)
+            with p1:
+                conservative = st.form_submit_button("🛡️ Conservative")
+            with p2:
+                balanced = st.form_submit_button("⚖️ Balanced")
+            with p3:
+                creative = st.form_submit_button("🎨 Creative")
 
-        temperature = st.slider("🌡️ Temperature", 0.0, 2.0, st.session_state.get('temperature', 1.0), 0.1)
-        top_k = st.slider("🔝 Top-k", 0, 100, st.session_state.get('top_k', 50), 5)
-        top_p = st.slider("🎯 Top-p", 0.0, 1.0, st.session_state.get('top_p', 0.9), 0.05)
+            temp = st.slider("🌡️ Temperature", 0.0, 2.0, st.session_state.get('temperature', 1.0), 0.1)
+            top_k = st.slider("🔝 Top-k", 0, 100, st.session_state.get('top_k', 50), 5)
+            top_p = st.slider("🎯 Top-p", 0.0, 1.0, st.session_state.get('top_p', 0.9), 0.05)
+            apply_params = st.form_submit_button("Apply")
+
+        if conservative:
+            st.session_state.update(temperature=0.3, top_k=10, top_p=0.8)
+        elif balanced:
+            st.session_state.update(temperature=0.8, top_k=50, top_p=0.9)
+        elif creative:
+            st.session_state.update(temperature=1.5, top_k=100, top_p=0.95)
+        elif apply_params:
+            st.session_state.update(temperature=temp, top_k=top_k, top_p=top_p)
+
+        temperature = st.session_state.get('temperature', 1.0)
+        top_k = st.session_state.get('top_k', 50)
+        top_p = st.session_state.get('top_p', 0.9)
 
         if temperature == 0: strategy = "🔒 Greedy"
         elif top_k > 0 and top_p < 1.0: strategy = f"🎯 Top-k ({top_k}) + Top-p ({top_p})"
@@ -734,7 +776,6 @@ def main():
                     st.session_state.sequence_tokens = []
                     st.session_state.sequence_entropies = []
                     st.session_state.sequence_top1_probs = []
-                    # if compare, compute second set once
                     if compare_models and model_name_2:
                         st.session_state.predictions_2 = generate_probabilities(text, model_name_2, temperature, top_k, top_p)
                 else:
@@ -785,34 +826,50 @@ def main():
                 "📊 Probability Chart", "☁️ Word Cloud", "📈 Metrics Analysis", "📉 Confidence Tracking"
             ])
 
+            # Shared keys for caching renders
+            pred_hash = _hash_key(
+                st.session_state.get('current_text',''),
+                st.session_state.get('current_model',''),
+                temperature, top_k, top_p, predictions
+            )
+
             with tab1:
                 fig = create_probability_chart(predictions)
                 st.plotly_chart(fig, use_container_width=True)
-                try:
+
+                # On-demand PNG render
+                png_ready = st.session_state.get('chart_png_ready') == pred_hash
+                if st.button("🖼️ Prepare Chart Image", key=f"prep_chart_{pred_hash}"):
+                    with st.spinner("Rendering PNG…"):
+                        try:
+                            png_bytes = render_chart_png_cached(fig.to_dict(), width=1000, height=600, scale=1)
+                            st.session_state['chart_png'] = png_bytes
+                            st.session_state['chart_png_ready'] = pred_hash
+                            png_ready = True
+                        except Exception as e:
+                            st.error(f"Chart export failed: {e}")
+                if png_ready:
                     st.download_button(
-                        "🖼️ Download This Chart (PNG)",
-                        data=export_chart_png(fig),
+                        "Download Chart (PNG)",
+                        data=st.session_state['chart_png'],
                         file_name=f"token_probabilities_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
                         mime="image/png"
                     )
-                except Exception as e:
-                    st.warning(f"Chart export failed: {e}")
 
             with tab2:
-                # Word cloud image from probabilities
-                try:
-                    wc = WordCloud(width=800, height=400, background_color='white')
-                    wc.generate_from_frequencies(predictions)
-                    st.image(
-                        wc.to_array(),
-                        caption="Word Cloud of Token Probabilities",
-                        use_container_width=True
-                    )
-                    # Optional table for transparency
-                    df_wc = create_wordcloud_data(predictions)
-                    st.dataframe(df_wc, use_container_width=True)
-                except Exception as e:
-                    st.warning(f"Word cloud failed: {e}")
+                # On-demand Word Cloud render
+                wc_ready = st.session_state.get('wc_png_ready') == pred_hash
+                if st.button("☁️ Prepare Word Cloud Image", key=f"prep_wc_{pred_hash}"):
+                    with st.spinner("Generating Word Cloud…"):
+                        try:
+                            wc_png = render_wordcloud_png_cached(predictions, width=800, height=400)
+                            st.session_state['wc_png'] = wc_png
+                            st.session_state['wc_png_ready'] = pred_hash
+                            wc_ready = True
+                        except Exception as e:
+                            st.error(f"Word Cloud failed: {e}")
+                if wc_ready:
+                    st.image(st.session_state['wc_png'], caption="Word Cloud of Token Probabilities", use_container_width=True)
 
             with tab3:
                 st.markdown(f"""
@@ -821,6 +878,34 @@ def main():
 - Perplexity: {st.session_state.perplexity:.1f}
 - Top Token Probability: {max(predictions.values())*100:.1f}%
                 """)
+
+                # On-demand PDF report
+                pdf_ready = st.session_state.get('report_pdf_ready') == pred_hash
+                if st.button("📄 Prepare Prediction Report (PDF)", key=f"prep_pdf_{pred_hash}"):
+                    with st.spinner("Building PDF…"):
+                        try:
+                            fig = create_probability_chart(predictions)
+                            pdf_bytes = render_prediction_pdf_cached(
+                                prompt_text=st.session_state.get('current_text',''),
+                                params={'temperature': temperature, 'top_k': top_k, 'top_p': top_p,
+                                        'model_name': st.session_state.get('current_model','')},
+                                metrics={'entropy': st.session_state.get('entropy'),
+                                         'perplexity': st.session_state.get('perplexity')},
+                                predictions=predictions,
+                                fig_dict=fig.to_dict()
+                            )
+                            st.session_state['report_pdf'] = pdf_bytes
+                            st.session_state['report_pdf_ready'] = pred_hash
+                            pdf_ready = True
+                        except Exception as e:
+                            st.error(f"PDF export failed: {e}")
+                if pdf_ready:
+                    st.download_button(
+                        label="Download Report (PDF)",
+                        data=st.session_state['report_pdf'],
+                        file_name=f"token_explorer_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                        mime="application/pdf"
+                    )
 
             with tab4:
                 st.markdown("Each **Continue One Token** records the current distribution entropy and top-1 probability before appending.")
@@ -847,7 +932,7 @@ def main():
                     st.session_state.sequence_top1_probs = []
                     st.success("Tracking reset.")
 
-    # Right: activities + exports + handout export
+    # Right: activities + handout export
     with col_right:
         st.markdown("### 🏫 Classroom Activities")
         act = st.selectbox("Choose Activity", ["-- Select --"] + list(ACTIVITIES.keys()))
@@ -863,77 +948,25 @@ def main():
                 for g in a['learning_goals']:
                     st.markdown(f"- {g}")
 
-            try:
-                pdf_handout = generate_activity_handout_pdf(act, a)
+            handout_key = hashlib.sha1(act.encode()).hexdigest()
+            ready = st.session_state.get('handout_ready') == handout_key
+            if st.button("📄 Prepare Handout PDF", key=f"prep_handout_{handout_key}"):
+                with st.spinner("Creating handout…"):
+                    try:
+                        pdf_handout = render_handout_pdf_cached(act, a)
+                        st.session_state['handout_pdf'] = pdf_handout
+                        st.session_state['handout_ready'] = handout_key
+                        ready = True
+                    except Exception as e:
+                        st.error(f"Handout export failed: {e}")
+            if ready:
                 st.download_button(
-                    label="📄 Download Handout",
-                    data=pdf_handout,
+                    label="Download Handout",
+                    data=st.session_state['handout_pdf'],
                     file_name=f"{act.replace(' ', '_').lower()}_handout_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                     mime="application/pdf",
                     use_container_width=True
                 )
-            except Exception as e:
-                st.warning(f"Handout export failed: {e}")
-
-        st.markdown("---")
-        st.markdown("### 📤 Export")
-
-        current_fig = None
-        if st.session_state.get('predictions'):
-            current_fig = create_probability_chart(st.session_state.predictions)
-
-        if current_fig is not None:
-            try:
-                st.download_button(
-                    label="🖼️ Download Chart Image (PNG)",
-                    data=export_chart_png(current_fig),
-                    file_name=f"token_probabilities_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
-                    mime="image/png",
-                    use_container_width=True
-                )
-            except Exception as e:
-                st.warning(f"Image export failed: {e}")
-
-        if st.session_state.get('predictions'):
-            df_csv = pd.DataFrame([
-                {"Rank": i, "Token": t, "Probability": f"{p*100:.2f}%",
-                 "Model": st.session_state.get('current_model'),
-                 "Temperature": st.session_state.get('temperature'),
-                 "Top_k": st.session_state.get('top_k'),
-                 "Top_p": st.session_state.get('top_p')}
-                for i, (t, p) in enumerate(st.session_state.predictions.items(), 1)
-            ])
-            st.download_button(
-                "📊 Download Predictions (CSV)",
-                df_csv.to_csv(index=False),
-                file_name=f"token_predictions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
-
-            try:
-                pdf_bytes = generate_pdf_report(
-                    prompt_text=st.session_state.get('current_text', ''),
-                    params={'temperature': st.session_state.get('temperature'),
-                            'top_k': st.session_state.get('top_k'),
-                            'top_p': st.session_state.get('top_p'),
-                            'model_name': st.session_state.get('current_model')},
-                    metrics={'entropy': st.session_state.get('entropy'),
-                             'perplexity': st.session_state.get('perplexity')},
-                    predictions=st.session_state.get('predictions'),
-                    fig=current_fig
-                )
-                st.download_button(
-                    label="📄 Download Report (PDF)",
-                    data=pdf_bytes,
-                    file_name=f"token_explorer_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
-                    mime="application/pdf",
-                    use_container_width=True
-                )
-            except Exception as e:
-                st.warning(f"PDF export failed: {e}")
-        else:
-            st.info("Generate predictions to enable exports.")
 
     # Class Poll Mode
     if st.session_state.poll_mode:
@@ -957,6 +990,7 @@ def main():
         with c2:
             st.markdown("### 🧠 Human vs AI")
             if st.session_state.student_predictions and st.session_state.get('predictions'):
+                from collections import Counter
                 counts = Counter(st.session_state.student_predictions)
                 total = len(st.session_state.student_predictions)
                 top5_students = counts.most_common(5)
@@ -1013,8 +1047,8 @@ def main():
     st.markdown("---")
     st.markdown("""
     <div style='text-align: center; color: #6C757D; padding: 20px;'>
-      <p><strong>Token Explorer for Educators</strong> | Cloud + Accessibility Edition</p>
-      <p>Making AI Transparent in the Classroom</p>
+      <p><strong>Token Explorer for Educators</strong> | Fast & Accessible Edition</p>
+      <p>On-demand exports and caching reduce load time</p>
     </div>
     """, unsafe_allow_html=True)
 
