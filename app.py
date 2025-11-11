@@ -1,7 +1,12 @@
 """
 Token Explorer for Educators - Streamlit Application
-Enhanced with Confidence Tracking (Continue One Token loop)
-Deploy with: streamlit run app.py
+Features:
+- Image export via plotly.io.to_image (kaleido)
+- PDF report via reportlab
+- Confidence Tracking: Continue One Token loop
+- Human vs AI Visualization: grouped bar chart in Poll Mode
+
+Run: streamlit run app.py
 """
 
 import streamlit as st
@@ -9,7 +14,6 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
-from plotly.subplots import make_subplots
 import plotly.io as pio
 from datetime import datetime
 import random
@@ -24,7 +28,9 @@ from reportlab.pdfgen import canvas as rl_canvas
 from reportlab.lib.units import inch
 from reportlab.platypus import Table, TableStyle
 
-# Page configuration
+# ---------------------------------------------------------------------
+# Page config and minimal CSS
+# ---------------------------------------------------------------------
 st.set_page_config(
     page_title="Token Explorer for Educators",
     page_icon="🎓",
@@ -32,7 +38,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for basic styling
 st.markdown("""
 <style>
     .stButton>button { min-height: 44px; min-width: 44px; font-size: 16px; }
@@ -43,39 +48,26 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Glossary
+# ---------------------------------------------------------------------
+# Glossary and content
+# ---------------------------------------------------------------------
 GLOSSARY = {
-    "Token": {
-        "simple": "A piece of text the model sees: a word, part of a word, or punctuation.",
-        "detailed": "Tokens are the basic units. Some words split into subwords for efficiency."
-    },
-    "Probability": {
-        "simple": "How likely the model thinks a token should come next.",
-        "detailed": "A normalized score across all possible next tokens."
-    },
-    "Temperature": {
-        "simple": "Controls creativity vs predictability.",
-        "detailed": "Scales logits before softmax. Low = deterministic, high = diverse."
-    },
-    "Top-k": {
-        "simple": "Keep only the k most likely tokens.",
-        "detailed": "Fixed-size shortlist to reduce noise."
-    },
-    "Top-p (Nucleus)": {
-        "simple": "Keep smallest set of tokens summing to p.",
-        "detailed": "Adaptive shortlist based on uncertainty."
-    },
-    "Perplexity": {
-        "simple": "Lower is better. Measures confusion.",
-        "detailed": "Equivalent number of equally likely options."
-    },
-    "Entropy": {
-        "simple": "Higher means more uncertainty.",
-        "detailed": "Shannon entropy of the next-token distribution."
-    }
+    "Token": {"simple": "A piece of text the model sees: a word, part of a word, or punctuation.",
+              "detailed": "Tokens are the basic units. Some words split into subwords for efficiency."},
+    "Probability": {"simple": "How likely the model thinks a token should come next.",
+                    "detailed": "A normalized score across all possible next tokens."},
+    "Temperature": {"simple": "Controls creativity vs predictability.",
+                    "detailed": "Scales logits before softmax. Low = deterministic, high = diverse."},
+    "Top-k": {"simple": "Keep only the k most likely tokens.",
+              "detailed": "Fixed-size shortlist to reduce noise."},
+    "Top-p (Nucleus)": {"simple": "Keep smallest set of tokens summing to p.",
+                        "detailed": "Adaptive shortlist based on uncertainty."},
+    "Perplexity": {"simple": "Lower is better. Measures confusion.",
+                   "detailed": "Equivalent number of equally likely options."},
+    "Entropy": {"simple": "Higher means more uncertainty.",
+                "detailed": "Shannon entropy of the next-token distribution."}
 }
 
-# Example prompts
 EXAMPLE_PROMPTS = {
     "Famous Quotes": [
         "To be or not to be,",
@@ -114,36 +106,25 @@ EXAMPLE_PROMPTS = {
     ]
 }
 
-# Model configurations
 MODELS = {
-    "GPT-2 (English)": {
-        "vocab_size": 50257, "languages": ["English"],
-        "description": "General-purpose English model",
-        "best_for": "Story writing, general predictions"
-    },
-    "BERT Base (English)": {
-        "vocab_size": 30522, "languages": ["English"],
-        "description": "Mask prediction, strong context understanding",
-        "best_for": "Fill-in-the-blank"
-    },
-    "BERT Multilingual": {
-        "vocab_size": 119547, "languages": ["English","Spanish","French","German","Chinese","Arabic","Hindi","104 total"],
-        "description": "Supports 104 languages",
-        "best_for": "Multilingual text"
-    },
-    "GPT-2 Spanish": {
-        "vocab_size": 50257, "languages": ["Spanish"],
-        "description": "Spanish generation",
-        "best_for": "Spanish text generation"
-    },
-    "DistilGPT-2 (Fast)": {
-        "vocab_size": 50257, "languages": ["English"],
-        "description": "Smaller, faster GPT-2",
-        "best_for": "Quick demos"
-    }
+    "GPT-2 (English)": {"vocab_size": 50257, "languages": ["English"],
+                        "description": "General-purpose English model",
+                        "best_for": "Story writing, general predictions"},
+    "BERT Base (English)": {"vocab_size": 30522, "languages": ["English"],
+                            "description": "Mask prediction, strong context understanding",
+                            "best_for": "Fill-in-the-blank"},
+    "BERT Multilingual": {"vocab_size": 119547,
+                          "languages": ["English","Spanish","French","German","Chinese","Arabic","Hindi","104 total"],
+                          "description": "Supports 104 languages",
+                          "best_for": "Multilingual text"},
+    "GPT-2 Spanish": {"vocab_size": 50257, "languages": ["Spanish"],
+                      "description": "Spanish generation",
+                      "best_for": "Spanish text generation"},
+    "DistilGPT-2 (Fast)": {"vocab_size": 50257, "languages": ["English"],
+                           "description": "Smaller, faster GPT-2",
+                           "best_for": "Quick demos"}
 }
 
-# Classroom activities (trimmed)
 ACTIVITIES = {
     "Predict the Next Word Game": {
         "grade_level": "3-8",
@@ -164,41 +145,27 @@ ACTIVITIES = {
     }
 }
 
-# Quiz questions (short)
 QUIZ_QUESTIONS = [
-    {
-        "question": "What does 'temperature' control in a language model?",
-        "options": ["Speed", "Creativity vs predictability", "CPU heat", "Vocabulary size"],
-        "correct": 1,
-        "explanation": "Temperature scales randomness. Low = predictable, high = diverse."
-    }
+    {"question": "What does 'temperature' control in a language model?",
+     "options": ["Speed", "Creativity vs predictability", "CPU heat", "Vocabulary size"],
+     "correct": 1, "explanation": "Temperature scales randomness. Low = predictable, high = diverse."}
 ]
 
-# ---------- Probabilities + Metrics ----------
-
+# ---------------------------------------------------------------------
+# Probability and metrics
+# ---------------------------------------------------------------------
 def generate_probabilities(prompt, model_name, temperature, top_k, top_p):
-    # context-aware toy distributions
     context_predictions = {
-        "The cat sat on the": {
-            "mat": 0.35, "chair": 0.20, "floor": 0.15, "table": 0.12,
-            "sofa": 0.08, "bed": 0.05, "couch": 0.03, "roof": 0.02
-        },
-        "Once upon a time in a": {
-            "kingdom": 0.40, "land": 0.25, "forest": 0.15, "village": 0.10,
-            "castle": 0.05, "city": 0.03, "galaxy": 0.02
-        },
-        "Water boils at": {
-            "100": 0.70, "212": 0.15, "boiling": 0.05, "high": 0.04,
-            "sea": 0.03, "room": 0.02, "atmospheric": 0.01
-        },
-        "To be or not to be,": {
-            "that": 0.90, "this": 0.03, "whether": 0.02, "it": 0.02,
-            "what": 0.01, "which": 0.01, "the": 0.01
-        },
-        "The Earth revolves around": {
-            "the": 0.85, "Sun": 0.08, "its": 0.03, "a": 0.02,
-            "our": 0.01, "itself": 0.01
-        }
+        "The cat sat on the": {"mat": 0.35, "chair": 0.20, "floor": 0.15, "table": 0.12,
+                               "sofa": 0.08, "bed": 0.05, "couch": 0.03, "roof": 0.02},
+        "Once upon a time in a": {"kingdom": 0.40, "land": 0.25, "forest": 0.15, "village": 0.10,
+                                  "castle": 0.05, "city": 0.03, "galaxy": 0.02},
+        "Water boils at": {"100": 0.70, "212": 0.15, "boiling": 0.05, "high": 0.04,
+                           "sea": 0.03, "room": 0.02, "atmospheric": 0.01},
+        "To be or not to be,": {"that": 0.90, "this": 0.03, "whether": 0.02, "it": 0.02,
+                                "what": 0.01, "which": 0.01, "the": 0.01},
+        "The Earth revolves around": {"the": 0.85, "Sun": 0.08, "its": 0.03, "a": 0.02,
+                                      "our": 0.01, "itself": 0.01}
     }
     base = None
     for k in context_predictions:
@@ -221,17 +188,17 @@ def generate_probabilities(prompt, model_name, temperature, top_k, top_p):
 
     # top-k
     if top_k > 0:
-        sorted_items = sorted(base.items(), key=lambda x: x[1], reverse=True)[:top_k]
-        base = dict(sorted_items)
+        items = sorted(base.items(), key=lambda x: x[1], reverse=True)[:top_k]
+        base = dict(items)
         s = sum(base.values())
         base = {k: v/s for k, v in base.items()}
 
     # top-p
     if top_p < 1.0:
-        sorted_items = sorted(base.items(), key=lambda x: x[1], reverse=True)
+        items = sorted(base.items(), key=lambda x: x[1], reverse=True)
         csum = 0.0
         nucleus = []
-        for tok, p in sorted_items:
+        for tok, p in items:
             nucleus.append((tok, p))
             csum += p
             if csum >= top_p:
@@ -240,7 +207,6 @@ def generate_probabilities(prompt, model_name, temperature, top_k, top_p):
         s = sum(base.values())
         base = {k: v/s for k, v in base.items()}
 
-    # final sorted
     return dict(sorted(base.items(), key=lambda x: x[1], reverse=True))
 
 def calculate_entropy(probabilities):
@@ -253,8 +219,9 @@ def calculate_entropy(probabilities):
 def calculate_perplexity(entropy):
     return 2 ** entropy
 
-# ---------- Charts ----------
-
+# ---------------------------------------------------------------------
+# Charts
+# ---------------------------------------------------------------------
 def create_probability_chart(predictions):
     tokens = list(predictions.keys())[:10]
     probs = [predictions[t] * 100 for t in tokens]
@@ -264,18 +231,19 @@ def create_probability_chart(predictions):
         elif p > 20: colors_list.append('#17A2B8')
         elif p > 5: colors_list.append('#FFC107')
         else: colors_list.append('#6C757D')
-    fig = go.Figure(data=[
-        go.Bar(y=tokens, x=probs, orientation='h',
-               marker=dict(color=colors_list),
-               text=[f'{p:.1f}%' for p in probs], textposition='outside')
-    ])
+    fig = go.Figure(data=[go.Bar(
+        y=tokens, x=probs, orientation='h',
+        marker=dict(color=colors_list),
+        text=[f'{p:.1f}%' for p in probs],
+        textposition='outside'
+    )])
     fig.update_layout(
         title="Top 10 Token Probabilities",
         xaxis_title="Probability (%)",
         yaxis_title="Token",
         height=500,
         showlegend=False,
-        yaxis={'categoryorder':'total ascending'}
+        yaxis={'categoryorder': 'total ascending'}
     )
     return fig
 
@@ -290,13 +258,13 @@ def create_entropy_chart(entropy_values):
         fig.update_layout(title="Entropy Over Token Sequence",
                           xaxis_title="Step", yaxis_title="Entropy (bits)")
         return fig
-    fig = go.Figure(data=[
-        go.Scatter(x=list(range(1, len(entropy_values)+1)),
-                   y=entropy_values,
-                   mode='lines+markers',
-                   marker=dict(size=8, color='#0066CC'),
-                   line=dict(width=2, color='#0066CC'))
-    ])
+    fig = go.Figure(data=[go.Scatter(
+        x=list(range(1, len(entropy_values)+1)),
+        y=entropy_values,
+        mode='lines+markers',
+        marker=dict(size=8, color='#0066CC'),
+        line=dict(width=2, color='#0066CC')
+    )])
     fig.update_layout(
         title="Entropy Over Token Sequence",
         xaxis_title="Step",
@@ -305,8 +273,9 @@ def create_entropy_chart(entropy_values):
     )
     return fig
 
-# ---------- Exports ----------
-
+# ---------------------------------------------------------------------
+# Exports
+# ---------------------------------------------------------------------
 def export_chart_png(fig) -> bytes:
     if fig is None:
         return b""
@@ -326,8 +295,7 @@ def _draw_wrapped_text(c, text, x, y, max_width, line_height=14, font_name="Helv
         w = words[0]
         test = f"{line} {w}".strip()
         if c.stringWidth(test, font_name, font_size) <= max_width:
-            line = test
-            words.pop(0)
+            line = test; words.pop(0)
         else:
             c.drawString(x, y, line); y -= line_height; line = ""
     if line:
@@ -347,16 +315,12 @@ def generate_pdf_report(prompt_text: str, params: dict, metrics: dict, predictio
     y = height - margin
 
     c.setTitle("Token Explorer Report")
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(x, y, "Token Explorer for Educators — Prediction Report")
+    c.setFont("Helvetica-Bold", 16); c.drawString(x, y, "Token Explorer for Educators — Prediction Report")
     y -= 18
-    c.setFont("Helvetica", 10)
-    c.setFillColor(colors.grey)
+    c.setFont("Helvetica", 10); c.setFillColor(colors.grey)
     c.drawString(x, y, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    c.setFillColor(colors.black)
-    y -= 22
-    c.line(x, y, width - margin, y)
-    y -= 18
+    c.setFillColor(colors.black); y -= 22
+    c.line(x, y, width - margin, y); y -= 18
 
     c.setFont("Helvetica-Bold", 12); c.drawString(x, y, "Input Prompt:"); y -= 16
     y = _draw_wrapped_text(c, prompt_text or "(none)", x, y, max_width=width - 2*margin, font_size=11)
@@ -418,10 +382,10 @@ def generate_pdf_report(prompt_text: str, params: dict, metrics: dict, predictio
     c.showPage(); c.save(); buf.seek(0)
     return buf.read()
 
-# ---------- Session State ----------
-
+# ---------------------------------------------------------------------
+# Session state defaults
+# ---------------------------------------------------------------------
 def _ensure_state_defaults():
-    # tutorial / ui
     st.session_state.setdefault('tutorial_shown', False)
     st.session_state.setdefault('show_tutorial', False)
     st.session_state.setdefault('show_glossary', False)
@@ -430,15 +394,13 @@ def _ensure_state_defaults():
     st.session_state.setdefault('high_contrast', False)
     st.session_state.setdefault('font_size', 'Medium')
 
-    # params
     st.session_state.setdefault('temperature', 1.0)
     st.session_state.setdefault('top_k', 50)
     st.session_state.setdefault('top_p', 0.9)
 
-    # data
     st.session_state.setdefault('input_text', '')
     st.session_state.setdefault('current_text', '')
-    st.session_state.setdefault('current_model', None)
+    st.session_state.setdefault('current_model', list(MODELS.keys())[0])
     st.session_state.setdefault('predictions', None)
     st.session_state.setdefault('entropy', None)
     st.session_state.setdefault('perplexity', None)
@@ -450,13 +412,13 @@ def _ensure_state_defaults():
 
 _ensure_state_defaults()
 
-# ---------- Main UI ----------
-
+# ---------------------------------------------------------------------
+# Main UI
+# ---------------------------------------------------------------------
 def main():
     st.title("🎓 Token Explorer for Educators")
-    st.markdown("### Visualize token-by-token prediction and confidence")
+    st.markdown("### Visualize token-by-token prediction, confidence, and classroom polls")
 
-    # Welcome
     if not st.session_state.tutorial_shown:
         with st.expander("👋 Quick Start", expanded=True):
             st.markdown("""
@@ -464,7 +426,8 @@ def main():
 2) Choose a model  
 3) Set temperature / top-k / top-p  
 4) Generate predictions  
-5) Use **Continue One Token** to step the model and track entropy over time
+5) Use **Continue One Token** to step and track entropy  
+6) Use **Class Poll Mode** for Human vs AI visualization
             """)
             if st.button("Got it"):
                 st.session_state.tutorial_shown = True
@@ -498,7 +461,7 @@ def main():
 
     col_left, col_mid, col_right = st.columns([1,2,1])
 
-    # ------ LEFT: Input + Models ------
+    # Left: input + models
     with col_left:
         st.markdown("### 📝 Input")
         cat = st.selectbox("Load Example", ["-- Select --"] + list(EXAMPLE_PROMPTS.keys()))
@@ -507,7 +470,6 @@ def main():
             if st.button("Load Example"):
                 st.session_state.input_text = ex
                 st.session_state.current_text = ex
-
         if st.button("🎲 Random Example"):
             rcat = random.choice(list(EXAMPLE_PROMPTS.keys()))
             rval = random.choice(EXAMPLE_PROMPTS[rcat])
@@ -515,17 +477,14 @@ def main():
             st.session_state.current_text = rval
 
         st.session_state.input_text = st.text_area(
-            "Enter text",
-            value=st.session_state.get('input_text', ''),
-            height=150
+            "Enter text", value=st.session_state.get('input_text', ''), height=150
         )
-        # Sync current_text with manual edits
         if st.session_state.input_text != st.session_state.current_text:
             st.session_state.current_text = st.session_state.input_text
 
         st.markdown("### 🤖 Model")
         model_name = st.selectbox("Choose Model", list(MODELS.keys()),
-                                  index=list(MODELS.keys()).index(st.session_state.get('current_model') or "GPT-2 (English)"))
+                                  index=list(MODELS.keys()).index(st.session_state.get('current_model')))
         st.session_state.current_model = model_name
         mi = MODELS[model_name]
         st.info(f"**{model_name}**  \n📊 Vocab: {mi['vocab_size']:,}  \n🌍 Languages: {', '.join(mi['languages'][:3])}{'...' if len(mi['languages'])>3 else ''}  \n✨ Best for: {mi['best_for']}")
@@ -535,35 +494,26 @@ def main():
         if compare_models:
             model_name_2 = st.selectbox("Second Model", [m for m in MODELS.keys() if m != model_name])
 
-    # ------ MIDDLE: Parameters + Predictions + Confidence Tracking ------
+    # Middle: parameters + predictions + confidence tracking
     with col_mid:
         st.markdown("### 🎚️ Parameters")
         p1, p2, p3 = st.columns(3)
         with p1:
-            if st.button("🛡️ Conservative"):
-                st.session_state.temperature = 0.3; st.session_state.top_k = 10; st.session_state.top_p = 0.8
+            if st.button("🛡️ Conservative"): st.session_state.update(temperature=0.3, top_k=10, top_p=0.8)
         with p2:
-            if st.button("⚖️ Balanced"):
-                st.session_state.temperature = 0.8; st.session_state.top_k = 50; st.session_state.top_p = 0.9
+            if st.button("⚖️ Balanced"): st.session_state.update(temperature=0.8, top_k=50, top_p=0.9)
         with p3:
-            if st.button("🎨 Creative"):
-                st.session_state.temperature = 1.5; st.session_state.top_k = 100; st.session_state.top_p = 0.95
+            if st.button("🎨 Creative"): st.session_state.update(temperature=1.5, top_k=100, top_p=0.95)
 
         temperature = st.slider("🌡️ Temperature", 0.0, 2.0, st.session_state.get('temperature', 1.0), 0.1)
         top_k = st.slider("🔝 Top-k", 0, 100, st.session_state.get('top_k', 50), 5)
         top_p = st.slider("🎯 Top-p", 0.0, 1.0, st.session_state.get('top_p', 0.9), 0.05)
 
-        # Strategy label
-        if temperature == 0:
-            strategy = "🔒 Greedy"
-        elif top_k > 0 and top_p < 1.0:
-            strategy = f"🎯 Top-k ({top_k}) + Top-p ({top_p})"
-        elif top_k > 0:
-            strategy = f"🔝 Top-k ({top_k})"
-        elif top_p < 1.0:
-            strategy = f"🎯 Nucleus (Top-p={top_p})"
-        else:
-            strategy = "🌡️ Temperature sampling"
+        if temperature == 0: strategy = "🔒 Greedy"
+        elif top_k > 0 and top_p < 1.0: strategy = f"🎯 Top-k ({top_k}) + Top-p ({top_p})"
+        elif top_k > 0: strategy = f"🔝 Top-k ({top_k})"
+        elif top_p < 1.0: strategy = f"🎯 Nucleus (Top-p={top_p})"
+        else: strategy = "🌡️ Temperature sampling"
         st.info(f"**Decoding Strategy:** {strategy}")
 
         gen_c1, gen_c2 = st.columns([2,1])
@@ -575,17 +525,18 @@ def main():
                     st.session_state.predictions = preds
                     ent = calculate_entropy(preds); ppl = calculate_perplexity(ent)
                     st.session_state.entropy = ent; st.session_state.perplexity = ppl
-                    # reset confidence tracking for a fresh sequence
+                    # reset confidence tracking
                     st.session_state.sequence_tokens = []
                     st.session_state.sequence_entropies = []
                     st.session_state.sequence_top1_probs = []
+                    # if compare, compute second set once
+                    if compare_models and model_name_2:
+                        st.session_state.predictions_2 = generate_probabilities(text, model_name_2, temperature, top_k, top_p)
                 else:
                     st.warning("Enter some text.")
         with gen_c2:
-            # Continue One Token loop
             if st.button("➡️ Continue One Token", use_container_width=True):
                 if st.session_state.get('predictions'):
-                    # Record current step metrics BEFORE appending
                     curr_preds = st.session_state.predictions
                     curr_entropy = calculate_entropy(curr_preds)
                     top_token, top_prob = next(iter(curr_preds.items()))
@@ -593,12 +544,10 @@ def main():
                     st.session_state.sequence_top1_probs.append(top_prob)
                     st.session_state.sequence_tokens.append(top_token)
 
-                    # Append token to prompt
                     new_text = (st.session_state.current_text + " " + top_token).strip()
                     st.session_state.current_text = new_text
-                    st.session_state.input_text = new_text  # keep textarea in sync
+                    st.session_state.input_text = new_text
 
-                    # Recompute predictions for new prompt
                     new_preds = generate_probabilities(new_text, st.session_state.current_model, temperature, top_k, top_p)
                     st.session_state.predictions = new_preds
                     ent = calculate_entropy(new_preds); ppl = calculate_perplexity(ent)
@@ -606,25 +555,19 @@ def main():
                 else:
                     st.info("Generate predictions first.")
 
-        # Predictions block
         if st.session_state.get('predictions'):
             st.markdown("---")
             st.markdown("### 🎯 Predictions")
-
             predictions = st.session_state.predictions
+
             max_prob = max(predictions.values())
-            if max_prob > 0.5:
-                st.success("✅ High confidence (>50%)")
-            elif max_prob > 0.2:
-                st.info("ℹ️ Medium confidence (20–50%)")
-            else:
-                st.warning("⚠️ Low confidence (<20%)")
+            if max_prob > 0.5: st.success("✅ High confidence (>50%)")
+            elif max_prob > 0.2: st.info("ℹ️ Medium confidence (20–50%)")
+            else: st.warning("⚠️ Low confidence (<20%)")
 
             m1, m2 = st.columns(2)
-            with m1:
-                st.metric("📊 Entropy", f"{st.session_state.entropy:.2f} bits")
-            with m2:
-                st.metric("🎲 Perplexity", f"{st.session_state.perplexity:.1f}")
+            with m1: st.metric("📊 Entropy", f"{st.session_state.entropy:.2f} bits")
+            with m2: st.metric("🎲 Perplexity", f"{st.session_state.perplexity:.1f}")
 
             st.markdown("#### Top 10 Tokens")
             if compare_models and st.session_state.get('predictions_2'):
@@ -650,10 +593,7 @@ def main():
             st.markdown("---")
             st.markdown("### 📊 Visualizations")
             tab1, tab2, tab3, tab4 = st.tabs([
-                "📊 Probability Chart",
-                "☁️ Word Cloud Data",
-                "📈 Metrics Analysis",
-                "📉 Confidence Tracking"
+                "📊 Probability Chart", "☁️ Word Cloud Data", "📈 Metrics Analysis", "📉 Confidence Tracking"
             ])
 
             with tab1:
@@ -686,17 +626,14 @@ def main():
 - Top Token Probability: {max(predictions.values())*100:.1f}%
                 """)
 
-            # New: Confidence Tracking tab
             with tab4:
-                st.markdown("Step the model with **Continue One Token**. Each step records the distribution entropy and top-1 probability before appending the chosen token.")
+                st.markdown("Each **Continue One Token** records the current distribution entropy and top-1 probability before appending.")
                 seq_ent = st.session_state.sequence_entropies
                 seq_p1 = st.session_state.sequence_top1_probs
                 seq_tok = st.session_state.sequence_tokens
 
-                # Entropy line chart
                 st.plotly_chart(create_entropy_chart(seq_ent), use_container_width=True)
 
-                # Step table
                 if seq_tok:
                     df_steps = pd.DataFrame({
                         "Step": list(range(1, len(seq_tok)+1)),
@@ -706,16 +643,15 @@ def main():
                     })
                     st.dataframe(df_steps, use_container_width=True)
                 else:
-                    st.info("No steps recorded yet. Click **Continue One Token** to start tracking.")
+                    st.info("No steps yet. Click **Continue One Token** to start tracking.")
 
-                # Reset tracking
                 if st.button("♻️ Reset Tracking"):
                     st.session_state.sequence_tokens = []
                     st.session_state.sequence_entropies = []
                     st.session_state.sequence_top1_probs = []
                     st.success("Tracking reset.")
 
-    # ------ RIGHT: Activities + Export ------
+    # Right: activities + exports
     with col_right:
         st.markdown("### 🏫 Classroom Activities")
         act = st.selectbox("Choose Activity", ["-- Select --"] + list(ACTIVITIES.keys()))
@@ -738,7 +674,7 @@ def main():
         if st.session_state.get('predictions'):
             current_fig = create_probability_chart(st.session_state.predictions)
 
-        # PNG export
+        # PNG
         if current_fig is not None:
             try:
                 st.download_button(
@@ -751,43 +687,35 @@ def main():
             except Exception as e:
                 st.warning(f"Image export failed: {e}")
 
-        # CSV export
+        # CSV
         if st.session_state.get('predictions'):
-            df = pd.DataFrame([
-                {
-                    'Rank': i,
-                    'Token': token,
-                    'Probability': f"{prob*100:.2f}%",
-                    'Model': st.session_state.get('current_model'),
-                    'Temperature': st.session_state.get('temperature'),
-                    'Top_k': st.session_state.get('top_k'),
-                    'Top_p': st.session_state.get('top_p')
-                }
-                for i, (token, prob) in enumerate(st.session_state.predictions.items(), 1)
+            df_csv = pd.DataFrame([
+                {"Rank": i, "Token": t, "Probability": f"{p*100:.2f}%",
+                 "Model": st.session_state.get('current_model'),
+                 "Temperature": st.session_state.get('temperature'),
+                 "Top_k": st.session_state.get('top_k'),
+                 "Top_p": st.session_state.get('top_p')}
+                for i, (t, p) in enumerate(st.session_state.predictions.items(), 1)
             ])
             st.download_button(
                 "📊 Download Predictions (CSV)",
-                df.to_csv(index=False),
+                df_csv.to_csv(index=False),
                 file_name=f"token_predictions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                 mime="text/csv",
                 use_container_width=True
             )
 
-        # PDF export
+        # PDF
         if st.session_state.get('predictions'):
             try:
                 pdf_bytes = generate_pdf_report(
                     prompt_text=st.session_state.get('current_text', ''),
-                    params={
-                        'temperature': st.session_state.get('temperature'),
-                        'top_k': st.session_state.get('top_k'),
-                        'top_p': st.session_state.get('top_p'),
-                        'model_name': st.session_state.get('current_model')
-                    },
-                    metrics={
-                        'entropy': st.session_state.get('entropy'),
-                        'perplexity': st.session_state.get('perplexity')
-                    },
+                    params={'temperature': st.session_state.get('temperature'),
+                            'top_k': st.session_state.get('top_k'),
+                            'top_p': st.session_state.get('top_p'),
+                            'model_name': st.session_state.get('current_model')},
+                    metrics={'entropy': st.session_state.get('entropy'),
+                             'perplexity': st.session_state.get('perplexity')},
                     predictions=st.session_state.get('predictions'),
                     fig=current_fig
                 )
@@ -803,42 +731,91 @@ def main():
         else:
             st.info("Generate predictions to enable exports.")
 
-    # Poll Mode (unchanged minimal)
+    # -----------------------------------------------------------------
+    # Class Poll Mode with Human vs AI grouped bar visualization
+    # -----------------------------------------------------------------
     if st.session_state.poll_mode:
-        st.markdown("---"); st.markdown("## 📊 Class Poll Mode")
+        st.markdown("---")
+        st.markdown("## 📊 Class Poll Mode")
         c1, c2 = st.columns(2)
+
         with c1:
-            st.markdown("**Join Code**: " + f"POLL-{random.randint(1000, 9999)}")
+            st.markdown("### 👥 Student Submissions")
+            st.markdown(f"**Join Code**: POLL-{random.randint(1000, 9999)}")
             guess = st.text_input("Your prediction:", key="student_guess")
             if st.button("Submit Prediction"):
                 if guess:
-                    st.session_state.student_predictions.append(guess.lower())
+                    st.session_state.student_predictions.append(guess.strip().lower())
                     st.success("Submitted.")
             st.metric("Total Submissions", len(st.session_state.student_predictions))
             if st.button("🗑️ Clear All Predictions"):
-                st.session_state.student_predictions = []; st.rerun()
+                st.session_state.student_predictions = []
+                st.rerun()
+
         with c2:
+            st.markdown("### 🧠 Human vs AI")
             if st.session_state.student_predictions and st.session_state.get('predictions'):
+                # Top-5 student predictions by vote share
                 counts = Counter(st.session_state.student_predictions)
                 total = len(st.session_state.student_predictions)
-                st.markdown("**Top Student Predictions:**")
-                for w, c in counts.most_common(5):
-                    st.markdown(f"- **{w}**: {c} ({(c/total)*100:.0f}%)")
-                st.markdown("**Top AI Predictions:**")
-                for t, p in list(st.session_state.predictions.items())[:5]:
-                    st.markdown(f"- **{t}**: {p*100:.1f}%")
-                top_student = counts.most_common(1)[0][0]
-                top_ai = next(iter(st.session_state.predictions.keys()))
+                top5_students = counts.most_common(5)
+                student_df = pd.DataFrame(
+                    {"Token": [w for w, _ in top5_students],
+                     "Percent": [(c/total)*100 for _, c in top5_students]}
+                )
+
+                # Top-5 AI predictions by probability
+                ai_items = list(st.session_state.predictions.items())[:5]
+                ai_df = pd.DataFrame(
+                    {"Token": [t for t, _ in ai_items],
+                     "Percent": [p*100 for _, p in ai_items]}
+                )
+
+                # Combine labels and build grouped data
+                tokens_union = sorted(set(student_df["Token"]).union(set(ai_df["Token"])))
+                combined_rows = []
+                for tok in tokens_union:
+                    s_val = float(student_df.loc[student_df["Token"] == tok, "Percent"].iloc[0]) if (student_df["Token"] == tok).any() else 0.0
+                    a_val = float(ai_df.loc[ai_df["Token"] == tok, "Percent"].iloc[0]) if (ai_df["Token"] == tok).any() else 0.0
+                    combined_rows.append({"Token": tok, "Source": "Students", "Percent": s_val})
+                    combined_rows.append({"Token": tok, "Source": "AI", "Percent": a_val})
+
+                combined_df = pd.DataFrame(combined_rows)
+
+                st.dataframe(
+                    pd.concat([
+                        student_df.assign(Source="Students"),
+                        ai_df.assign(Source="AI")
+                    ], ignore_index=True),
+                    use_container_width=True
+                )
+
+                fig_cmp = px.bar(
+                    combined_df,
+                    x="Token", y="Percent",
+                    color="Source",
+                    barmode="group",
+                    title="Student vs AI Predictions",
+                    text=combined_df["Percent"].round(1).astype(str) + "%"
+                )
+                fig_cmp.update_layout(yaxis_title="Percent (%)", xaxis_title="Token", height=450)
+                st.plotly_chart(fig_cmp, use_container_width=True)
+
+                # Quick verdict message
+                top_student = top5_students[0][0]
+                top_ai = ai_items[0][0]
                 if top_student == top_ai:
                     st.success(f"✅ Agreement on '{top_student}'")
                 else:
-                    st.info(f"Students chose '{top_student}', AI chose '{top_ai}'")
+                    st.info(f"Students: '{top_student}' vs AI: '{top_ai}'")
+            else:
+                st.info("Need at least one student submission and an AI prediction to display the comparison.")
 
     # Footer
     st.markdown("---")
     st.markdown("""
     <div style='text-align: center; color: #6C757D; padding: 20px;'>
-      <p><strong>Token Explorer for Educators</strong> | Confidence Tracking Edition</p>
+      <p><strong>Token Explorer for Educators</strong> | Human vs AI Edition</p>
       <p>Making AI Transparent in the Classroom</p>
     </div>
     """, unsafe_allow_html=True)
