@@ -1,14 +1,14 @@
 """
 Token Explorer for Educators - Streamlit Application
-Features:
-- Image export via plotly.io.to_image (kaleido)
-- PDF report via reportlab
+Accessibility-focused build:
+- High-contrast theme toggle with dynamic CSS
+- Global font-size control via CSS on <html>
+- ARIA roles and labels on custom HTML (glossary items, probability badges)
+- Word Cloud Visualization (wordcloud)
+- Human vs AI Visualization (grouped bar)
 - Confidence Tracking: Continue One Token loop
-- Human vs AI Visualization: grouped bar chart in Poll Mode
-- Printable Activity Handouts (PDF) via reportlab
-- High-Contrast & Font-Size dynamic toggles
-- Word Cloud Visualization using 'wordcloud'
-
+- Printable Activity Handouts (PDF via reportlab)
+- Chart export via plotly.io.to_image (kaleido)
 Run: streamlit run app.py
 """
 
@@ -31,7 +31,7 @@ from reportlab.pdfgen import canvas as rl_canvas
 from reportlab.lib.units import inch
 from reportlab.platypus import Table, TableStyle
 
-# NEW: Word cloud
+# Word cloud
 from wordcloud import WordCloud
 
 # ---------------------------------------------------------------------
@@ -48,10 +48,11 @@ st.set_page_config(
 st.markdown("""
 <style>
     .stButton>button { min-height: 44px; min-width: 44px; font-size: 16px; }
-    .probability-high { background-color: #28A745; color: white; padding: 8px; border-radius: 5px; }
-    .probability-medium { background-color: #17A2B8; color: white; padding: 8px; border-radius: 5px; }
-    .probability-low { background-color: #FFC107; color: black; padding: 8px; border-radius: 5px; }
-    .probability-verylow { background-color: #6C757D; color: white; padding: 8px; border-radius: 5px; }
+    .probability-high { background-color: #28A745; color: #FFFFFF; padding: 8px; border-radius: 6px; }
+    .probability-medium { background-color: #17A2B8; color: #FFFFFF; padding: 8px; border-radius: 6px; }
+    .probability-low { background-color: #FFC107; color: #111111; padding: 8px; border-radius: 6px; }
+    .probability-verylow { background-color: #6C757D; color: #FFFFFF; padding: 8px; border-radius: 6px; }
+    .visually-hidden { position:absolute !important; height:1px; width:1px; overflow:hidden; clip:rect(1px,1px,1px,1px); white-space:nowrap; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -272,7 +273,6 @@ def create_probability_chart(predictions):
     return fig
 
 def create_wordcloud_data(predictions):
-    # still used to show tabular data under the word cloud
     return pd.DataFrame(
         [{'token': t, 'probability': p*100} for t, p in list(predictions.items())[:50]]
     )
@@ -476,13 +476,17 @@ def _ensure_state_defaults():
     st.session_state.setdefault('show_glossary', False)
     st.session_state.setdefault('poll_mode', False)
     st.session_state.setdefault('student_predictions', [])
-    st.session_state.setdefault('high_contrast', False)
-    st.session_state.setdefault('font_size', 'Medium')
 
+    # Accessibility toggles
+    st.session_state.setdefault('high_contrast', False)
+    st.session_state.setdefault('font_size', 'Medium')  # Small / Medium / Large
+
+    # Params
     st.session_state.setdefault('temperature', 1.0)
     st.session_state.setdefault('top_k', 50)
     st.session_state.setdefault('top_p', 0.9)
 
+    # Current prediction context
     st.session_state.setdefault('input_text', '')
     st.session_state.setdefault('current_text', '')
     st.session_state.setdefault('current_model', list(MODELS.keys())[0])
@@ -490,6 +494,7 @@ def _ensure_state_defaults():
     st.session_state.setdefault('entropy', None)
     st.session_state.setdefault('perplexity', None)
 
+    # Confidence tracking sequence
     st.session_state.setdefault('sequence_tokens', [])
     st.session_state.setdefault('sequence_entropies', [])
     st.session_state.setdefault('sequence_top1_probs', [])
@@ -500,35 +505,73 @@ _ensure_state_defaults()
 # Dynamic style injection for High-Contrast and Font-Size
 # ---------------------------------------------------------------------
 def apply_dynamic_styles():
+    # Font size map
     font_map = {"Small": "14px", "Medium": "16px", "Large": "18px"}
     base_size = font_map.get(st.session_state.get("font_size", "Medium"), "16px")
 
+    # Start style with global font size
     css_parts = [f"""
     <style>
-      html, body, .markdown-text-container, .stMarkdown, .stText, .stRadio, .stSelectbox, .stMultiSelect,
+      html {{ font-size: {base_size}; }}
+      body, .markdown-text-container, .stMarkdown, .stText, .stRadio, .stSelectbox, .stMultiSelect,
       .stDataFrame, .stMetric, .stTextInput, .stTextArea, .stSlider, .stDownloadButton, .stButton, .stExpander,
-      .stTabs, .stTab {{ font-size: {base_size}; line-height: 1.5; }}
-      .stTextInput input, .stTextArea textarea, .stSelectbox div[data-baseweb="select"] {{ font-size: {base_size}; }}
-      .stSlider div[role="slider"], .stButton>button, .stDownloadButton>button {{ font-size: {base_size}; }}
+      .stTabs, .stTab {{ font-size: 1rem; line-height: 1.5; }}
+      .stTextInput input, .stTextArea textarea, .stSelectbox div[data-baseweb="select"],
+      .stButton>button, .stDownloadButton>button {{ font-size: 1rem; }}
     """]
 
+    # High-contrast theme
     if st.session_state.get("high_contrast", False):
         css_parts.append("""
+        /* High-contrast palette */
         html, body { background-color: #000000 !important; color: #FFFFFF !important; }
-        .block-container, .stApp { background-color: #000000 !important; }
+        .stApp, .block-container { background-color: #000000 !important; }
         h1, h2, h3, h4, h5, h6, p, li, label, span, div { color: #FFFFFF !important; }
         a { color: #00E5FF !important; text-decoration: underline; }
         .stButton>button, .stDownloadButton>button {
             background-color: #FFFFFF !important; color: #000000 !important; border: 2px solid #FFFFFF !important;
         }
+        .stTextInput>div>div>input, .stTextArea textarea, .stSelectbox div[role="combobox"] {
+            background-color: #111111 !important; color: #FFFFFF !important; border: 1px solid #FFFFFF !important;
+        }
+        /* Tables and dataframes */
         .stDataFrame, .dataframe, .stTable { filter: invert(1) hue-rotate(180deg); }
+        /* Probability badges tuned for contrast */
         .probability-high { background-color: #00A65A !important; color: #FFFFFF !important; }
         .probability-medium { background-color: #148EA1 !important; color: #FFFFFF !important; }
-        .probability-low { background-color: #C19A00 !important; color: #000000 !important; }
+        .probability-low { background-color: #C19A00 !important; color: #111111 !important; }
         .probability-verylow { background-color: #888888 !important; color: #FFFFFF !important; }
         """)
     css_parts.append("</style>")
     st.markdown("\n".join(css_parts), unsafe_allow_html=True)
+
+# ---------------------------------------------------------------------
+# Accessible HTML render helpers
+# ---------------------------------------------------------------------
+def render_probability_badge(rank: int, token: str, prob: float) -> str:
+    pct = prob * 100
+    if pct > 50: cls = "probability-high"
+    elif pct > 20: cls = "probability-medium"
+    elif pct > 5: cls = "probability-low"
+    else: cls = "probability-verylow"
+    # role="note" for descriptive chip. aria-label fully describes the item.
+    label = f"Rank {rank}. Token {token}. Probability {pct:.1f} percent."
+    return (
+        f'<div class="{cls}" role="note" aria-label="{label}" aria-live="polite">'
+        f'#{rank}: <strong>{token}</strong> — {pct:.1f}%'
+        f'</div>'
+    )
+
+def render_glossary_item(term: str, simple: str, detailed: str) -> str:
+    # Use a list item structure with roles
+    term_id = f"glossary-{term.replace(' ', '-').lower()}"
+    return f"""
+    <section role="listitem" aria-labelledby="{term_id}">
+      <h4 id="{term_id}" role="heading" aria-level="4">{term}</h4>
+      <p role="note" aria-label="Simple definition for {term}">{simple}</p>
+      <p role="note" aria-label="Detailed definition for {term}">{detailed}</p>
+    </section>
+    """
 
 # ---------------------------------------------------------------------
 # Main UI
@@ -547,7 +590,7 @@ def main():
 5) Use **Continue One Token** to step and track entropy  
 6) Use **Class Poll Mode** for Human vs AI visualization  
 7) Print **Activity Handouts** for the classroom  
-8) Try the **Word Cloud** view of token probabilities
+8) Use **High Contrast** and **Font** controls for accessibility
             """)
             if st.button("Got it"):
                 st.session_state.tutorial_shown = True
@@ -577,11 +620,10 @@ def main():
 
     if st.session_state.show_glossary:
         with st.expander("📖 Glossary", expanded=True):
+            st.markdown('<div role="list" aria-label="AI glossary terms">', unsafe_allow_html=True)
             for term, d in GLOSSARY.items():
-                st.markdown(f"**{term}**")
-                st.markdown(f"*Simple:* {d['simple']}")
-                st.markdown(f"*Detailed:* {d['detailed']}")
-                st.markdown("")
+                st.markdown(render_glossary_item(term, d['simple'], d['detailed']), unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
 
     col_left, col_mid, col_right = st.columns([1,2,1])
 
@@ -681,7 +723,7 @@ def main():
 
         if st.session_state.get('predictions'):
             st.markdown("---")
-            st.markdown("### 🎯 Predictions")
+            st.markdown("### 🎯 Predictions", help="Top tokens with probabilities and uncertainty metrics.")
             predictions = st.session_state.predictions
 
             max_prob = max(predictions.values())
@@ -693,26 +735,10 @@ def main():
             with m1: st.metric("📊 Entropy", f"{st.session_state.entropy:.2f} bits")
             with m2: st.metric("🎲 Perplexity", f"{st.session_state.perplexity:.1f}")
 
-            st.markdown("#### Top 10 Tokens")
-            if compare_models and st.session_state.get('predictions_2'):
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.markdown(f"**{st.session_state.current_model}**")
-                    for i, (tok, p) in enumerate(list(predictions.items())[:10], 1):
-                        pct = p*100
-                        cls = "probability-high" if pct>50 else "probability-medium" if pct>20 else "probability-low" if pct>5 else "probability-verylow"
-                        st.markdown(f'<div class="{cls}">#{i}: <strong>{tok}</strong> — {pct:.1f}%</div>', unsafe_allow_html=True)
-                with c2:
-                    st.markdown(f"**{model_name_2}**")
-                    for i, (tok, p) in enumerate(list(st.session_state['predictions_2'].items())[:10], 1):
-                        pct = p*100
-                        cls = "probability-high" if pct>50 else "probability-medium" if pct>20 else "probability-low" if pct>5 else "probability-verylow"
-                        st.markdown(f'<div class="{cls}">#{i}: <strong>{tok}</strong> — {pct:.1f}%</div>', unsafe_allow_html=True)
-            else:
-                for i, (tok, p) in enumerate(list(predictions.items())[:10], 1):
-                    pct = p*100
-                    cls = "probability-high" if pct>50 else "probability-medium" if pct>20 else "probability-low" if pct>5 else "probability-verylow"
-                    st.markdown(f'<div class="{cls}">#{i}: <strong>{tok}</strong> — {pct:.1f}%</div>', unsafe_allow_html=True)
+            st.markdown('<div role="list" aria-label="Top tokens by probability" aria-live="polite">', unsafe_allow_html=True)
+            for i, (tok, p) in enumerate(list(predictions.items())[:10], 1):
+                st.markdown(render_probability_badge(i, tok, p), unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
 
             st.markdown("---")
             st.markdown("### 📊 Visualizations")
@@ -734,13 +760,16 @@ def main():
                     st.warning(f"Chart export failed: {e}")
 
             with tab2:
-                # NEW: actual word cloud image from probabilities
+                # Word cloud image from probabilities
                 try:
                     wc = WordCloud(width=800, height=400, background_color='white')
-                    # WordCloud expects dict mapping token->weight
                     wc.generate_from_frequencies(predictions)
-                    st.image(wc.to_array(), caption="Word Cloud of Token Probabilities", use_container_width=True)
-                    # Optional data table for transparency
+                    st.image(
+                        wc.to_array(),
+                        caption="Word Cloud of Token Probabilities",
+                        use_container_width=True
+                    )
+                    # Optional table for transparency
                     df_wc = create_wordcloud_data(predictions)
                     st.dataframe(df_wc, use_container_width=True)
                 except Exception as e:
@@ -795,7 +824,6 @@ def main():
                 for g in a['learning_goals']:
                     st.markdown(f"- {g}")
 
-            # Printable Handout button
             try:
                 pdf_handout = generate_activity_handout_pdf(act, a)
                 st.download_button(
@@ -815,7 +843,6 @@ def main():
         if st.session_state.get('predictions'):
             current_fig = create_probability_chart(st.session_state.predictions)
 
-        # PNG
         if current_fig is not None:
             try:
                 st.download_button(
@@ -828,7 +855,6 @@ def main():
             except Exception as e:
                 st.warning(f"Image export failed: {e}")
 
-        # CSV
         if st.session_state.get('predictions'):
             df_csv = pd.DataFrame([
                 {"Rank": i, "Token": t, "Probability": f"{p*100:.2f}%",
@@ -846,8 +872,6 @@ def main():
                 use_container_width=True
             )
 
-        # Prediction PDF
-        if st.session_state.get('predictions'):
             try:
                 pdf_bytes = generate_pdf_report(
                     prompt_text=st.session_state.get('current_text', ''),
@@ -872,7 +896,7 @@ def main():
         else:
             st.info("Generate predictions to enable exports.")
 
-    # Class Poll Mode: Human vs AI grouped bar visualization
+    # Class Poll Mode
     if st.session_state.poll_mode:
         st.markdown("---")
         st.markdown("## 📊 Class Poll Mode")
@@ -950,7 +974,7 @@ def main():
     st.markdown("---")
     st.markdown("""
     <div style='text-align: center; color: #6C757D; padding: 20px;'>
-      <p><strong>Token Explorer for Educators</strong> | Word Cloud Edition</p>
+      <p><strong>Token Explorer for Educators</strong> | Accessibility Edition</p>
       <p>Making AI Transparent in the Classroom</p>
     </div>
     """, unsafe_allow_html=True)
