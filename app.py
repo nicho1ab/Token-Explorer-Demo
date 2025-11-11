@@ -10,6 +10,7 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
+import plotly.io as pio
 import json
 from datetime import datetime
 import random
@@ -17,6 +18,13 @@ import math
 from collections import Counter
 import base64
 from io import BytesIO
+
+# PDF generation
+from reportlab.lib.pagesizes import LETTER
+from reportlab.lib import colors
+from reportlab.pdfgen import canvas as rl_canvas
+from reportlab.lib.units import inch
+from reportlab.platypus import Table, TableStyle
 
 # Page configuration
 st.set_page_config(
@@ -343,6 +351,166 @@ QUIZ_QUESTIONS = [
     }
 ]
 
+# === Helpers for export (PNG + PDF) ===
+
+def _build_top_tokens_table_data(predictions: dict, top_n: int = 10):
+    rows = [["Rank", "Token", "Probability"]]
+    for i, (tok, p) in enumerate(list(predictions.items())[:top_n], start=1):
+        rows.append([i, tok, f"{p*100:.2f}%"])
+    return rows
+
+def _draw_wrapped_text(c, text, x, y, max_width, line_height=14, font_name="Helvetica", font_size=10):
+    """Simple word-wrap for ReportLab canvas."""
+    c.setFont(font_name, font_size)
+    words = text.split()
+    line = ""
+    while words:
+        w = words[0]
+        test = f"{line} {w}".strip()
+        if c.stringWidth(test, font_name, font_size) <= max_width:
+            line = test
+            words.pop(0)
+        else:
+            c.drawString(x, y, line)
+            y -= line_height
+            line = ""
+    if line:
+        c.drawString(x, y, line)
+        y -= line_height
+    return y
+
+def generate_pdf_report(prompt_text: str,
+                        params: dict,
+                        metrics: dict,
+                        predictions: dict,
+                        fig) -> bytes:
+    """
+    Builds a single-PDF report containing:
+      - Title, timestamp
+      - Input prompt
+      - Parameters (temperature, top-k, top-p, model)
+      - Entropy / perplexity
+      - Top-10 tokens table
+      - Probability chart image (from Plotly via kaleido)
+    Returns PDF bytes.
+    """
+    # Render chart to PNG bytes via kaleido
+    chart_png = None
+    if fig is not None:
+        chart_png = pio.to_image(fig, format="png", width=1200, height=700, scale=2)
+
+    buf = BytesIO()
+    c = rl_canvas.Canvas(buf, pagesize=LETTER)
+    width, height = LETTER
+    margin = 0.75 * inch
+    x = margin
+    y = height - margin
+
+    # Header
+    c.setTitle("Token Explorer Report")
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(x, y, "Token Explorer for Educators — Prediction Report")
+    y -= 18
+    c.setFont("Helvetica", 10)
+    c.setFillColor(colors.grey)
+    c.drawString(x, y, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    c.setFillColor(colors.black)
+    y -= 22
+    c.line(x, y, width - margin, y)
+    y -= 18
+
+    # Prompt
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(x, y, "Input Prompt:")
+    y -= 16
+    y = _draw_wrapped_text(c, prompt_text or "(none)", x, y, max_width=width - 2*margin, font_size=11)
+
+    # Parameters
+    y -= 6
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(x, y, "Parameters:")
+    y -= 16
+    c.setFont("Helvetica", 11)
+    p_lines = [
+        f"Temperature: {params.get('temperature')}",
+        f"Top-k: {params.get('top_k')}",
+        f"Top-p: {params.get('top_p')}",
+        f"Model: {params.get('model_name')}",
+    ]
+    for line in p_lines:
+        c.drawString(x, y, line)
+        y -= 14
+
+    # Metrics
+    y -= 6
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(x, y, "Metrics:")
+    y -= 16
+    c.setFont("Helvetica", 11)
+    m_lines = [
+        f"Entropy: {metrics.get('entropy'):.2f} bits" if metrics.get("entropy") is not None else "Entropy: n/a",
+        f"Perplexity: {metrics.get('perplexity'):.2f}" if metrics.get("perplexity") is not None else "Perplexity: n/a",
+        f"Top Token Probability: {max(predictions.values())*100:.1f}%" if predictions else "Top Token Probability: n/a",
+    ]
+    for line in m_lines:
+        c.drawString(x, y, line)
+        y -= 14
+
+    # Top-10 tokens table
+    y -= 10
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(x, y, "Top-10 Tokens:")
+    y -= 16
+
+    table_data = _build_top_tokens_table_data(predictions or {}, 10)
+    tbl = Table(table_data, colWidths=[0.8*inch, 3.2*inch, 1.3*inch])
+    tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#E7F3FF")),
+        ("TEXTCOLOR", (0,0), (-1,0), colors.HexColor("#000000")),
+        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+        ("FONTSIZE", (0,0), (-1,0), 10),
+        ("BOTTOMPADDING", (0,0), (-1,0), 6),
+        ("GRID", (0,0), (-1,-1), 0.25, colors.HexColor("#B0B0B0")),
+        ("FONTNAME", (0,1), (-1,-1), "Helvetica"),
+        ("FONTSIZE", (0,1), (-1,-1), 10),
+        ("ALIGN", (0,0), (-1,-1), "LEFT"),
+    ]))
+    needed_height = 14 * len(table_data)  # rough estimate
+    if y - needed_height < margin + 220:  # leave space for chart image
+        c.showPage()
+        y = height - margin
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(x, y, "Top-10 Tokens (cont'd):")
+        y -= 18
+
+    tbl.wrapOn(c, width - 2*margin, y)
+    tbl.drawOn(c, x, y - (14 * len(table_data)))
+    y -= (14 * len(table_data) + 18)
+
+    # Chart image
+    if chart_png:
+        if y < margin + 220:
+            c.showPage()
+            y = height - margin
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(x, y, "Probability Chart:")
+        y -= 12
+        img_width = width - 2*margin
+        img_height = img_width * 0.55
+        c.drawImage(BytesIO(chart_png), x, y - img_height, width=img_width, height=img_height, preserveAspectRatio=True, mask='auto')
+        y -= (img_height + 6)
+
+    c.showPage()
+    c.save()
+    buf.seek(0)
+    return buf.read()
+
+def export_chart_png(fig) -> bytes:
+    """Return chart as PNG bytes via kaleido."""
+    if fig is None:
+        return b""
+    return pio.to_image(fig, format="png", width=1200, height=700, scale=2)
+
 # Initialize session state
 if 'tutorial_shown' not in st.session_state:
     st.session_state.tutorial_shown = False
@@ -382,7 +550,7 @@ def generate_probabilities(prompt, model_name, temperature, top_k, top_p):
     # Context-aware token suggestions
     context_predictions = {
         "The cat sat on the": {
-            "mat": 0.35, "chair": 0.20, "floor": 0.15, "table": 0.12, 
+            "mat": 0.35, "chair": 0.20, "floor": 0.15, "table": 0.12,
             "sofa": 0.08, "bed": 0.05, "couch": 0.03, "roof": 0.02
         },
         "Once upon a time in a": {
@@ -478,23 +646,23 @@ def create_probability_chart(predictions, chart_type="bar"):
     probs = [predictions[t] * 100 for t in tokens]
 
     # Color code by probability
-    colors = []
+    colors_list = []
     for p in probs:
         if p > 50:
-            colors.append('#28A745')  # Green
+            colors_list.append('#28A745')  # Green
         elif p > 20:
-            colors.append('#17A2B8')  # Blue
+            colors_list.append('#17A2B8')  # Blue
         elif p > 5:
-            colors.append('#FFC107')  # Orange
+            colors_list.append('#FFC107')  # Orange
         else:
-            colors.append('#6C757D')  # Gray
+            colors_list.append('#6C757D')  # Gray
 
     fig = go.Figure(data=[
         go.Bar(
             y=tokens,
             x=probs,
             orientation='h',
-            marker=dict(color=colors),
+            marker=dict(color=colors_list),
             text=[f'{p:.1f}%' for p in probs],
             textposition='outside'
         )
@@ -596,7 +764,7 @@ def main():
         st.session_state.high_contrast = st.checkbox("🌓 High Contrast", value=st.session_state.high_contrast)
 
     with col5:
-        st.session_state.font_size = st.selectbox("Font", ["Small", "Medium", "Large"], 
+        st.session_state.font_size = st.selectbox("Font", ["Small", "Medium", "Large"],
                                                    index=["Small", "Medium", "Large"].index(st.session_state.font_size),
                                                    label_visibility="collapsed")
 
@@ -866,9 +1034,17 @@ def main():
                 fig = create_probability_chart(predictions)
                 st.plotly_chart(fig, use_container_width=True)
 
-                # Download chart as image
-                if st.button("📥 Download Chart"):
-                    st.info("Chart downloaded! (In actual deployment, this would trigger a download)")
+                # Optional inline download for this single chart
+                try:
+                    png_bytes_inline = export_chart_png(fig)
+                    st.download_button(
+                        "🖼️ Download This Chart (PNG)",
+                        data=png_bytes_inline,
+                        file_name=f"token_probabilities_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+                        mime="image/png"
+                    )
+                except Exception as e:
+                    st.warning(f"Inline chart export failed: {e}")
 
             with viz_tab2:
                 df = create_wordcloud_data(predictions)
@@ -937,37 +1113,77 @@ def main():
         st.markdown("---")
         st.markdown("### 📤 Export Options")
 
-        if st.button("📄 Export as PDF", use_container_width=True):
-            st.success("PDF generated! (Would download in production)")
+        # Build a chart now if predictions exist so both exports share it
+        current_fig = None
+        if 'predictions' in st.session_state:
+            current_fig = create_probability_chart(st.session_state.predictions)
 
-        if st.button("🖼️ Export as Image", use_container_width=True):
-            st.success("Image saved! (Would download in production)")
-
-        if st.button("📊 Export as CSV", use_container_width=True):
-            if 'predictions' in st.session_state:
-                df = pd.DataFrame([
-                    {
-                        'Rank': i,
-                        'Token': token,
-                        'Probability': f"{prob*100:.2f}%",
-                        'Model': st.session_state.current_model,
-                        'Temperature': temperature,
-                        'Top_k': top_k,
-                        'Top_p': top_p
-                    }
-                    for i, (token, prob) in enumerate(st.session_state.predictions.items(), 1)
-                ])
-
-                csv = df.to_csv(index=False)
+        # IMAGE EXPORT (PNG)
+        if 'predictions' in st.session_state and current_fig is not None:
+            try:
+                png_bytes = export_chart_png(current_fig)
                 st.download_button(
-                    "💾 Download CSV",
-                    csv,
-                    file_name=f"token_predictions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv"
+                    label="🖼️ Download Chart Image (PNG)",
+                    data=png_bytes,
+                    file_name=f"token_probabilities_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+                    mime="image/png",
+                    use_container_width=True
                 )
+            except Exception as e:
+                st.warning(f"Image export failed: {e}")
 
-        if st.button("📝 Generate Quiz", use_container_width=True):
-            st.session_state.show_quiz = True
+        # CSV EXPORT
+        if 'predictions' in st.session_state:
+            df = pd.DataFrame([
+                {
+                    'Rank': i,
+                    'Token': token,
+                    'Probability': f"{prob*100:.2f}%",
+                    'Model': st.session_state.get('current_model'),
+                    'Temperature': st.session_state.get('temperature'),
+                    'Top_k': st.session_state.get('top_k'),
+                    'Top_p': st.session_state.get('top_p')
+                }
+                for i, (token, prob) in enumerate(st.session_state.predictions.items(), 1)
+            ])
+            csv = df.to_csv(index=False)
+            st.download_button(
+                "📊 Download Predictions (CSV)",
+                csv,
+                file_name=f"token_predictions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+
+        # PDF EXPORT
+        if 'predictions' in st.session_state:
+            try:
+                pdf_bytes = generate_pdf_report(
+                    prompt_text=st.session_state.get('current_text', ''),
+                    params={
+                        'temperature': st.session_state.get('temperature'),
+                        'top_k': st.session_state.get('top_k'),
+                        'top_p': st.session_state.get('top_p'),
+                        'model_name': st.session_state.get('current_model')
+                    },
+                    metrics={
+                        'entropy': st.session_state.get('entropy'),
+                        'perplexity': st.session_state.get('perplexity')
+                    },
+                    predictions=st.session_state.predictions,
+                    fig=current_fig
+                )
+                st.download_button(
+                    label="📄 Download Report (PDF)",
+                    data=pdf_bytes,
+                    file_name=f"token_explorer_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+            except Exception as e:
+                st.warning(f"PDF export failed: {e}")
+        else:
+            st.info("Generate predictions to enable exports.")
 
         st.markdown("---")
         st.markdown("### 🎓 Standards Alignment")
@@ -1067,11 +1283,9 @@ def main():
     st.markdown("""
     <div style='text-align: center; color: #6C757D; padding: 20px;'>
     <p><strong>Token Explorer for Educators</strong> | Version 2.0 | November 2025</p>
-    <p>Making AI Accessible to All Learners | Built with ❤️ for Educators</p>
+    <p>Making AI Accessible to All Learners | Built for Educators</p>
     </div>
     """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
-"""
-"""
