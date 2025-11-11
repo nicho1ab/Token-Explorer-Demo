@@ -13,6 +13,7 @@ Performance + Accessibility build:
 Run: streamlit run app.py
 """
 
+import os
 import random
 import math
 from datetime import datetime
@@ -22,6 +23,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
+from huggingface_hub import InferenceClient
 
 # ---------------------------------------------------------------------
 # Lightweight helpers
@@ -141,20 +143,25 @@ EXAMPLE_PROMPTS = {
 MODELS = {
     "GPT-2 (English)": {"vocab_size": 50257, "languages": ["English"],
                         "description": "General-purpose English model",
-                        "best_for": "Story writing, general predictions"},
+                        "best_for": "Story writing, general predictions",
+                        "hf_model_id": "gpt2"},
     "BERT Base (English)": {"vocab_size": 30522, "languages": ["English"],
                             "description": "Mask prediction, strong context understanding",
-                            "best_for": "Fill-in-the-blank"},
+                            "best_for": "Fill-in-the-blank",
+                            "hf_model_id": None},
     "BERT Multilingual": {"vocab_size": 119547,
                           "languages": ["English","Spanish","French","German","Chinese","Arabic","Hindi","104 total"],
                           "description": "Supports 104 languages",
-                          "best_for": "Multilingual text"},
+                          "best_for": "Multilingual text",
+                          "hf_model_id": None},
     "GPT-2 Spanish": {"vocab_size": 50257, "languages": ["Spanish"],
                       "description": "Spanish generation",
-                      "best_for": "Spanish text generation"},
+                      "best_for": "Spanish text generation",
+                      "hf_model_id": "datificate/gpt2-small-spanish"},
     "DistilGPT-2 (Fast)": {"vocab_size": 50257, "languages": ["English"],
                            "description": "Smaller, faster GPT-2",
-                           "best_for": "Quick demos"}
+                           "best_for": "Quick demos",
+                           "hf_model_id": "distilgpt2"}
 }
 
 ACTIVITIES = {
@@ -194,30 +201,32 @@ ACTIVITIES = {
     }
 }
 
+SIMULATED_CONTEXT_PREDICTIONS = {
+    "The cat sat on the": {"mat": 0.35, "chair": 0.20, "floor": 0.15, "table": 0.12,
+                           "sofa": 0.08, "bed": 0.05, "couch": 0.03, "roof": 0.02},
+    "Once upon a time in a": {"kingdom": 0.40, "land": 0.25, "forest": 0.15, "village": 0.10,
+                              "castle": 0.05, "city": 0.03, "galaxy": 0.02},
+    "Water boils at": {"100": 0.70, "212": 0.15, "boiling": 0.05, "high": 0.04,
+                       "sea": 0.03, "room": 0.02, "atmospheric": 0.01},
+    "To be or not to be,": {"that": 0.90, "this": 0.03, "whether": 0.02, "it": 0.02,
+                            "what": 0.01, "which": 0.01, "the": 0.01},
+    "The Earth revolves around": {"the": 0.85, "Sun": 0.08, "its": 0.03, "a": 0.02,
+                                  "our": 0.01, "itself": 0.01}
+}
+
+DEFAULT_SIMULATED_TOKENS = ["the", "a", "and", "is", "to", "of", "in", "it", "for", "on"]
+
 # ---------------------------------------------------------------------
 # Probability and metrics
 # ---------------------------------------------------------------------
-def generate_probabilities(prompt, model_name, temperature, top_k, top_p):
-    context_predictions = {
-        "The cat sat on the": {"mat": 0.35, "chair": 0.20, "floor": 0.15, "table": 0.12,
-                               "sofa": 0.08, "bed": 0.05, "couch": 0.03, "roof": 0.02},
-        "Once upon a time in a": {"kingdom": 0.40, "land": 0.25, "forest": 0.15, "village": 0.10,
-                                  "castle": 0.05, "city": 0.03, "galaxy": 0.02},
-        "Water boils at": {"100": 0.70, "212": 0.15, "boiling": 0.05, "high": 0.04,
-                           "sea": 0.03, "room": 0.02, "atmospheric": 0.01},
-        "To be or not to be,": {"that": 0.90, "this": 0.03, "whether": 0.02, "it": 0.02,
-                                "what": 0.01, "which": 0.01, "the": 0.01},
-        "The Earth revolves around": {"the": 0.85, "Sun": 0.08, "its": 0.03, "a": 0.02,
-                                      "our": 0.01, "itself": 0.01}
-    }
+def _generate_simulated_probabilities(prompt, model_name, temperature, top_k, top_p):
     base = None
-    for k in context_predictions:
+    for k in SIMULATED_CONTEXT_PREDICTIONS:
         if k.lower() in prompt.lower():
-            base = context_predictions[k].copy()
+            base = SIMULATED_CONTEXT_PREDICTIONS[k].copy()
             break
     if base is None:
-        default_tokens = ["the", "a", "and", "is", "to", "of", "in", "it", "for", "on"]
-        base = {t: random.uniform(0.05, 0.25) for t in default_tokens}
+        base = {t: random.uniform(0.05, 0.25) for t in DEFAULT_SIMULATED_TOKENS}
         s = sum(base.values())
         base = {k: v/s for k, v in base.items()}
 
@@ -251,6 +260,120 @@ def generate_probabilities(prompt, model_name, temperature, top_k, top_p):
         base = {k: v/s for k, v in base.items()}
 
     return dict(sorted(base.items(), key=lambda x: x[1], reverse=True))
+
+def _resolve_hf_token():
+    token = os.getenv("HF_API_TOKEN")
+    if not token and "HF_API_TOKEN" in st.secrets:
+        token = st.secrets["HF_API_TOKEN"]
+    return token
+
+@st.cache_resource(show_spinner=False)
+def _get_hf_client(model_id: str, token: str) -> InferenceClient:
+    return InferenceClient(model=model_id, token=token)
+
+def _maybe_notify_once(key: str, message: str, level: str = "warning"):
+    flag_key = f"__notification_shown_{key}"
+    if not st.session_state.get(flag_key, False):
+        notifier = getattr(st, level, st.warning)
+        notifier(message)
+        st.session_state[flag_key] = True
+
+def generate_probabilities(prompt, model_name, temperature, top_k, top_p):
+    model_meta = MODELS.get(model_name, {})
+    hf_model_id = model_meta.get("hf_model_id")
+
+    if not hf_model_id:
+        _maybe_notify_once(
+            f"hf_missing_model_{model_name}",
+            "Real Hugging Face predictions are not yet available for this model profile. Falling back to classroom simulator.",
+            level="info"
+        )
+        return _generate_simulated_probabilities(prompt, model_name, temperature, top_k, top_p)
+
+    hf_token = _resolve_hf_token()
+    if not hf_token:
+        _maybe_notify_once(
+            "hf_missing_token",
+            "Set the HF_API_TOKEN secret or environment variable to enable live probabilities from Hugging Face. Using simulator data instead.",
+            level="warning"
+        )
+        return _generate_simulated_probabilities(prompt, model_name, temperature, top_k, top_p)
+
+    try:
+        client = _get_hf_client(hf_model_id, hf_token)
+
+        request_kwargs = {
+            "max_new_tokens": 1,
+            "return_full_text": False,
+            "details": True,
+        }
+
+        if temperature <= 0.0:
+            request_kwargs["do_sample"] = False
+        else:
+            request_kwargs["do_sample"] = True
+            request_kwargs["temperature"] = float(temperature)
+            request_kwargs["top_p"] = float(top_p)
+            if top_k > 0:
+                request_kwargs["top_k"] = int(top_k)
+
+        if top_k > 0 and "top_k" not in request_kwargs:
+            request_kwargs["top_k"] = int(top_k)
+
+        response = client.text_generation(prompt, **request_kwargs)
+    except Exception as exc:
+        _maybe_notify_once(
+            f"hf_error_{model_name}",
+            f"Hugging Face request failed ({type(exc).__name__}: {exc}). Reverting to simulator data.",
+            level="error"
+        )
+        return _generate_simulated_probabilities(prompt, model_name, temperature, top_k, top_p)
+
+    details = getattr(response, "details", None)
+    tokens = getattr(details, "tokens", None) if details else None
+
+    if not tokens:
+        _maybe_notify_once(
+            f"hf_no_details_{model_name}",
+            "Hugging Face response did not include probability details. Using simulator data.",
+            level="warning"
+        )
+        return _generate_simulated_probabilities(prompt, model_name, temperature, top_k, top_p)
+
+    first_token = next((tok for tok in tokens if not getattr(tok, "special", False)), None)
+    if first_token is None:
+        return _generate_simulated_probabilities(prompt, model_name, temperature, top_k, top_p)
+
+    candidate_predictions = {}
+
+    top_candidates = getattr(first_token, "top_tokens", None)
+    if top_candidates:
+        for candidate in top_candidates:
+            text = getattr(candidate, "text", None)
+            logprob = getattr(candidate, "logprob", None)
+            if text is None or logprob is None:
+                continue
+            clean_text = text if text.strip() else text
+            prob = math.exp(logprob)
+            if clean_text in candidate_predictions:
+                candidate_predictions[clean_text] += prob
+            else:
+                candidate_predictions[clean_text] = prob
+    else:
+        token_text = getattr(first_token, "text", "") or ""
+        logprob = getattr(first_token, "logprob", None)
+        if token_text and logprob is not None:
+            clean_text = token_text if token_text.strip() else token_text
+            candidate_predictions[clean_text] = math.exp(logprob)
+
+    total_prob = sum(candidate_predictions.values())
+    if not candidate_predictions or total_prob <= 0:
+        return _generate_simulated_probabilities(prompt, model_name, temperature, top_k, top_p)
+
+    normalized = {tok: val / total_prob for tok, val in candidate_predictions.items() if tok}
+    sorted_preds = dict(sorted(normalized.items(), key=lambda x: x[1], reverse=True))
+
+    return sorted_preds
 
 def calculate_entropy(probabilities):
     e = 0.0
