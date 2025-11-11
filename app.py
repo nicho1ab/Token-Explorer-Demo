@@ -1,6 +1,6 @@
 """
 Token Explorer for Educators - Streamlit Application
-Accessibility-focused build:
+Accessibility + Cloud export build:
 - High-contrast theme toggle with dynamic CSS
 - Global font-size control via CSS on <html>
 - ARIA roles and labels on custom HTML (glossary items, probability badges)
@@ -8,9 +8,18 @@ Accessibility-focused build:
 - Human vs AI Visualization (grouped bar)
 - Confidence Tracking: Continue One Token loop
 - Printable Activity Handouts (PDF via reportlab)
-- Chart export via plotly.io.to_image (kaleido)
+- Chart export via plotly.io.to_image (kaleido), auto-configured for Streamlit Cloud
+
 Run: streamlit run app.py
 """
+
+import os
+import shutil
+import random
+import math
+from datetime import datetime
+from collections import Counter
+from io import BytesIO
 
 import streamlit as st
 import pandas as pd
@@ -18,11 +27,40 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 import plotly.io as pio
-from datetime import datetime
-import random
-import math
-from collections import Counter
-from io import BytesIO
+
+# Configure Kaleido to find headless Chrome/Chromium in Streamlit Cloud
+def _configure_kaleido_chrome():
+    # Prefer explicit env var if set via Streamlit Secrets or environment
+    env_path = os.environ.get("PLOTLY_CHROME_PATH")
+    candidates = [
+        env_path,
+        shutil.which("chromium"),
+        shutil.which("chromium-browser"),
+        shutil.which("google-chrome"),
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
+        "/usr/bin/google-chrome",
+    ]
+    for c in candidates:
+        if c and os.path.exists(c):
+            try:
+                # pio.kaleido is initialized lazily; accessing scope creates it
+                pio.kaleido.scope.chromium_path = c
+                return
+            except Exception:
+                pass
+    # Optional: last-ditch attempt to fetch a portable Chrome if available
+    try:
+        import subprocess
+        subprocess.run(["plotly_get_chrome"], check=True)
+        c2 = shutil.which("google-chrome") or shutil.which("chromium") or "/usr/bin/google-chrome"
+        if c2 and os.path.exists(c2):
+            pio.kaleido.scope.chromium_path = c2
+    except Exception:
+        # No hard failure here. UI try/except around to_image will surface errors.
+        pass
+
+_configure_kaleido_chrome()
 
 # PDF generation
 from reportlab.lib.pagesizes import LETTER
@@ -273,6 +311,7 @@ def create_probability_chart(predictions):
     return fig
 
 def create_wordcloud_data(predictions):
+    # For optional table under the word cloud
     return pd.DataFrame(
         [{'token': t, 'probability': p*100} for t, p in list(predictions.items())[:50]]
     )
@@ -974,7 +1013,7 @@ def main():
     st.markdown("---")
     st.markdown("""
     <div style='text-align: center; color: #6C757D; padding: 20px;'>
-      <p><strong>Token Explorer for Educators</strong> | Accessibility Edition</p>
+      <p><strong>Token Explorer for Educators</strong> | Cloud + Accessibility Edition</p>
       <p>Making AI Transparent in the Classroom</p>
     </div>
     """, unsafe_allow_html=True)
