@@ -5,6 +5,7 @@ Features:
 - PDF report via reportlab
 - Confidence Tracking: Continue One Token loop
 - Human vs AI Visualization: grouped bar chart in Poll Mode
+- Printable Activity Handouts (PDF) via reportlab
 
 Run: streamlit run app.py
 """
@@ -142,6 +143,23 @@ ACTIVITIES = {
             "Pattern recognition",
             "Intro to AI decision-making"
         ]
+    },
+    "Temperature Experiment": {
+        "grade_level": "6-12",
+        "duration": "25-30 minutes",
+        "description": "Explore how temperature affects creativity and coherence.",
+        "steps": [
+            "Start with the same prompt for all students",
+            "Generate predictions at a low temperature (e.g., 0.2)",
+            "Generate predictions at a high temperature (e.g., 1.5)",
+            "Compare and discuss differences",
+            "Students chart variety vs. coherence"
+        ],
+        "learning_goals": [
+            "Understanding parameters in AI systems",
+            "Balancing creativity and accuracy",
+            "Data analysis and comparison"
+        ]
     }
 }
 
@@ -274,7 +292,7 @@ def create_entropy_chart(entropy_values):
     return fig
 
 # ---------------------------------------------------------------------
-# Exports
+# Exports: Chart PNG + Prediction PDF
 # ---------------------------------------------------------------------
 def export_chart_png(fig) -> bytes:
     if fig is None:
@@ -383,6 +401,91 @@ def generate_pdf_report(prompt_text: str, params: dict, metrics: dict, predictio
     return buf.read()
 
 # ---------------------------------------------------------------------
+# NEW: Activity Handout PDF generator
+# ---------------------------------------------------------------------
+def generate_activity_handout_pdf(activity_title: str, activity: dict) -> bytes:
+    """
+    Create a printable PDF handout with:
+      - Activity title, grade, duration, description
+      - Numbered steps
+      - Learning goals
+    """
+    buf = BytesIO()
+    c = rl_canvas.Canvas(buf, pagesize=LETTER)
+    width, height = LETTER
+    margin = 0.75 * inch
+    x = margin
+    y = height - margin
+
+    # Header
+    c.setTitle(f"{activity_title} - Handout")
+    c.setFont("Helvetica-Bold", 18)
+    c.drawString(x, y, activity_title)
+    y -= 20
+    c.setFont("Helvetica", 10)
+    c.setFillColor(colors.grey)
+    c.drawString(x, y, f"Printable Activity Handout • Generated {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    c.setFillColor(colors.black)
+    y -= 14
+    c.line(x, y, width - margin, y)
+    y -= 18
+
+    # Meta
+    c.setFont("Helvetica-Bold", 12); c.drawString(x, y, "Grade Level:"); c.setFont("Helvetica", 12)
+    c.drawString(x + 90, y, activity.get("grade_level","N/A")); y -= 16
+    c.setFont("Helvetica-Bold", 12); c.drawString(x, y, "Duration:"); c.setFont("Helvetica", 12)
+    c.drawString(x + 90, y, activity.get("duration","N/A")); y -= 14
+
+    # Description
+    y -= 6
+    c.setFont("Helvetica-Bold", 12); c.drawString(x, y, "Description:")
+    y -= 16
+    y = _draw_wrapped_text(c, activity.get("description",""), x, y, max_width=width - 2*margin, font_size=11)
+
+    # Steps
+    y -= 8
+    c.setFont("Helvetica-Bold", 12); c.drawString(x, y, "Steps:")
+    y -= 16
+    c.setFont("Helvetica", 11)
+    for idx, step in enumerate(activity.get("steps", []), start=1):
+        bullet = f"{idx}. "
+        # wrap each step
+        y = _draw_wrapped_text(c, bullet + step, x, y, max_width=width - 2*margin, font_size=11)
+        y -= 2
+        if y < margin + 120:
+            c.showPage(); y = height - margin
+            c.setFont("Helvetica-Bold", 12); c.drawString(x, y, "Steps (cont'd):")
+            y -= 16
+            c.setFont("Helvetica", 11)
+
+    # Learning goals
+    y -= 6
+    c.setFont("Helvetica-Bold", 12); c.drawString(x, y, "Learning Goals:")
+    y -= 16
+    c.setFont("Helvetica", 11)
+    for goal in activity.get("learning_goals", []):
+        # Use a small dash to mark bullets; keep numbered steps above
+        y = _draw_wrapped_text(c, f"• {goal}", x, y, max_width=width - 2*margin, font_size=11)
+        y -= 2
+        if y < margin + 80:
+            c.showPage(); y = height - margin
+            c.setFont("Helvetica-Bold", 12); c.drawString(x, y, "Learning Goals (cont'd):")
+            y -= 16
+            c.setFont("Helvetica", 11)
+
+    # Footer
+    y = max(y, margin + 40)
+    c.setFont("Helvetica-Oblique", 9)
+    c.setFillColor(colors.grey)
+    c.drawString(x, margin, "Token Explorer for Educators • Handout")
+    c.setFillColor(colors.black)
+
+    c.showPage()
+    c.save()
+    buf.seek(0)
+    return buf.read()
+
+# ---------------------------------------------------------------------
 # Session state defaults
 # ---------------------------------------------------------------------
 def _ensure_state_defaults():
@@ -417,7 +520,7 @@ _ensure_state_defaults()
 # ---------------------------------------------------------------------
 def main():
     st.title("🎓 Token Explorer for Educators")
-    st.markdown("### Visualize token-by-token prediction, confidence, and classroom polls")
+    st.markdown("### Visualize token-by-token prediction, confidence, and classroom activities")
 
     if not st.session_state.tutorial_shown:
         with st.expander("👋 Quick Start", expanded=True):
@@ -427,7 +530,8 @@ def main():
 3) Set temperature / top-k / top-p  
 4) Generate predictions  
 5) Use **Continue One Token** to step and track entropy  
-6) Use **Class Poll Mode** for Human vs AI visualization
+6) Use **Class Poll Mode** for Human vs AI visualization  
+7) Print **Activity Handouts** for the classroom
             """)
             if st.button("Got it"):
                 st.session_state.tutorial_shown = True
@@ -651,7 +755,7 @@ def main():
                     st.session_state.sequence_top1_probs = []
                     st.success("Tracking reset.")
 
-    # Right: activities + exports
+    # Right: activities + exports + NEW handout export
     with col_right:
         st.markdown("### 🏫 Classroom Activities")
         act = st.selectbox("Choose Activity", ["-- Select --"] + list(ACTIVITIES.keys()))
@@ -666,6 +770,19 @@ def main():
                 st.markdown("**Learning Goals:**")
                 for g in a['learning_goals']:
                     st.markdown(f"- {g}")
+
+            # NEW: Printable Handout button
+            try:
+                pdf_handout = generate_activity_handout_pdf(act, a)
+                st.download_button(
+                    label="📄 Download Handout",
+                    data=pdf_handout,
+                    file_name=f"{act.replace(' ', '_').lower()}_handout_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+            except Exception as e:
+                st.warning(f"Handout export failed: {e}")
 
         st.markdown("---")
         st.markdown("### 📤 Export")
@@ -705,7 +822,7 @@ def main():
                 use_container_width=True
             )
 
-        # PDF
+        # Prediction PDF
         if st.session_state.get('predictions'):
             try:
                 pdf_bytes = generate_pdf_report(
@@ -815,7 +932,7 @@ def main():
     st.markdown("---")
     st.markdown("""
     <div style='text-align: center; color: #6C757D; padding: 20px;'>
-      <p><strong>Token Explorer for Educators</strong> | Human vs AI Edition</p>
+      <p><strong>Token Explorer for Educators</strong> | Printable Handouts Edition</p>
       <p>Making AI Transparent in the Classroom</p>
     </div>
     """, unsafe_allow_html=True)
