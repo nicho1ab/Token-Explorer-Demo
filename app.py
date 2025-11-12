@@ -25,6 +25,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 from huggingface_hub import InferenceClient
 from huggingface_hub.errors import HfHubHTTPError
+from typing import Optional
 
 # ---------------------------------------------------------------------
 # Lightweight helpers
@@ -262,15 +263,68 @@ def _generate_simulated_probabilities(prompt, model_name, temperature, top_k, to
 
     return dict(sorted(base.items(), key=lambda x: x[1], reverse=True))
 
-def _resolve_hf_token():
-    token = os.getenv("HF_API_TOKEN")
-    if not token and "HF_API_TOKEN" in st.secrets:
-        token = st.secrets["HF_API_TOKEN"]
-    return token
+def _resolve_hf_token() -> Optional[str]:
+    token_keys = [
+        "HF_API_TOKEN",
+        "HUGGINGFACEHUB_API_TOKEN",
+        "HF_TOKEN",
+        "HUGGING_FACE_HUB_TOKEN",
+        "HF_APIKEY",
+    ]
+
+    for key in token_keys:
+        token = os.getenv(key)
+        if token:
+            return token.strip()
+
+    secrets_obj = getattr(st, "secrets", None)
+    if secrets_obj:
+        for key in token_keys + [k.lower() for k in token_keys]:
+            try:
+                token = secrets_obj.get(key) if hasattr(secrets_obj, "get") else secrets_obj[key]
+            except KeyError:
+                token = None
+            if token:
+                return str(token).strip()
+
+    return None
+
+
+def _resolve_hf_endpoint() -> Optional[str]:
+    endpoint_keys = [
+        "HF_INFERENCE_ENDPOINT",
+        "HUGGINGFACEHUB_INFERENCE_ENDPOINT",
+        "HUGGINGFACEHUB_ENDPOINT",
+        "HF_ENDPOINT",
+    ]
+
+    for key in endpoint_keys:
+        endpoint = os.getenv(key)
+        if endpoint:
+            return endpoint.strip()
+
+    secrets_obj = getattr(st, "secrets", None)
+    if secrets_obj:
+        for key in endpoint_keys + [k.lower() for k in endpoint_keys]:
+            try:
+                endpoint = secrets_obj.get(key) if hasattr(secrets_obj, "get") else secrets_obj[key]
+            except KeyError:
+                endpoint = None
+            if endpoint:
+                return str(endpoint).strip()
+
+    return None
 
 @st.cache_resource(show_spinner=False)
-def _get_hf_client(model_id: str, token: str) -> InferenceClient:
-    return InferenceClient(model=model_id, token=token)
+def _get_hf_client(model_id: Optional[str], token: Optional[str], endpoint: Optional[str]) -> InferenceClient:
+    client_kwargs = {"token": token}
+    if endpoint:
+        client_kwargs["endpoint"] = endpoint
+    elif model_id:
+        client_kwargs["model"] = model_id
+    else:
+        raise ValueError("A Hugging Face model id or inference endpoint must be provided.")
+    return InferenceClient(**client_kwargs)
 
 def _maybe_notify_once(key: str, message: str, level: str = "warning"):
     flag_key = f"__notification_shown_{key}"
@@ -292,6 +346,7 @@ def generate_probabilities(prompt, model_name, temperature, top_k, top_p):
         return _generate_simulated_probabilities(prompt, model_name, temperature, top_k, top_p)
 
     hf_token = _resolve_hf_token()
+    hf_endpoint = _resolve_hf_endpoint()
     if not hf_token:
         _maybe_notify_once(
             "hf_missing_token",
@@ -301,12 +356,13 @@ def generate_probabilities(prompt, model_name, temperature, top_k, top_p):
         return _generate_simulated_probabilities(prompt, model_name, temperature, top_k, top_p)
 
     try:
-        client = _get_hf_client(hf_model_id, hf_token)
+        client = _get_hf_client(hf_model_id, hf_token, hf_endpoint)
 
         request_kwargs = {
             "max_new_tokens": 1,
             "return_full_text": False,
             "details": True,
+            "stream": False,
         }
 
         if temperature <= 0.0:
@@ -325,7 +381,7 @@ def generate_probabilities(prompt, model_name, temperature, top_k, top_p):
     except StopIteration:
         _maybe_notify_once(
             f"hf_provider_unavailable_{model_name}",
-            "Hugging Face Inference could not be reached with the current configuration. Double-check `HF_API_TOKEN` or remove it to use simulator data.",
+            "Hugging Face Inference response stream ended unexpectedly. Verify the Hugging Face configuration or retry shortly; using simulator data for now.",
             level="warning"
         )
         return _generate_simulated_probabilities(prompt, model_name, temperature, top_k, top_p)
