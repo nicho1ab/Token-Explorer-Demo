@@ -317,13 +317,21 @@ def _resolve_hf_endpoint() -> Optional[str]:
 
 @st.cache_resource(show_spinner=False)
 def _get_hf_client(model_id: Optional[str], token: Optional[str], endpoint: Optional[str]) -> InferenceClient:
+    if not token:
+        raise ValueError("An authentication token is required for Hugging Face Inference.")
+
     client_kwargs = {"token": token}
+
     if endpoint:
-        client_kwargs["endpoint"] = endpoint
+        client_kwargs["model"] = endpoint.rstrip("/")
     elif model_id:
         client_kwargs["model"] = model_id
+        provider = os.getenv("HF_INFERENCE_PROVIDER", "hf-inference").strip()
+        if provider:
+            client_kwargs["provider"] = provider
     else:
         raise ValueError("A Hugging Face model id or inference endpoint must be provided.")
+
     return InferenceClient(**client_kwargs)
 
 def _maybe_notify_once(key: str, message: str, level: str = "warning"):
