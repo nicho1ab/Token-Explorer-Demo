@@ -143,13 +143,13 @@ EXAMPLE_PROMPTS = {
 }
 
 MODELS = {
-    "Kimi K2 (Groq)": {
+    "Kimi K2 Thinking": {
         "vocab_size": 131072,
         "languages": ["English", "Chinese"],
-        "description": "Kimi K2 Instruct model served via Groq Inference",
-        "best_for": "Fast, instruction-tuned generation",
-        "hf_model_id": "moonshotai/Kimi-K2-Instruct-0905",
-        "hf_provider": "groq",
+        "description": "Kimi K2 Thinking model on Hugging Face Inference",
+        "best_for": "Chain-of-thought style text generation",
+        "hf_model_id": "moonshotai/Kimi-K2-Thinking",
+        "hf_provider": "hf-inference",
     }
 }
 
