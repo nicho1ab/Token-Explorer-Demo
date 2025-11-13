@@ -148,7 +148,8 @@ MODELS = {
         "languages": ["English", "Chinese"],
         "description": "Kimi K2 Instruct model served via Groq Inference",
         "best_for": "Fast, instruction-tuned generation",
-        "hf_model_id": "moonshotai/Kimi-K2-Instruct-0905:groq",
+        "hf_model_id": "moonshotai/Kimi-K2-Instruct-0905",
+        "hf_provider": "groq",
     }
 }
 
@@ -302,7 +303,12 @@ def _resolve_hf_endpoint() -> Optional[str]:
     return None
 
 @st.cache_resource(show_spinner=False)
-def _get_hf_client(model_id: Optional[str], token: Optional[str], endpoint: Optional[str]) -> InferenceClient:
+def _get_hf_client(
+    model_id: Optional[str],
+    token: Optional[str],
+    endpoint: Optional[str],
+    provider_override: Optional[str] = None
+) -> InferenceClient:
     if not token:
         raise ValueError("An authentication token is required for Hugging Face Inference.")
 
@@ -312,7 +318,10 @@ def _get_hf_client(model_id: Optional[str], token: Optional[str], endpoint: Opti
         client_kwargs["model"] = endpoint.rstrip("/")
     elif model_id:
         client_kwargs["model"] = model_id
-        provider = os.getenv("HF_INFERENCE_PROVIDER", "hf-inference").strip()
+        if provider_override:
+            provider = provider_override.strip()
+        else:
+            provider = os.getenv("HF_INFERENCE_PROVIDER", "hf-inference").strip()
         if provider:
             client_kwargs["provider"] = provider
     else:
@@ -330,6 +339,7 @@ def _maybe_notify_once(key: str, message: str, level: str = "warning"):
 def generate_probabilities(prompt, model_name, temperature, top_k, top_p):
     model_meta = MODELS.get(model_name, {})
     hf_model_id = model_meta.get("hf_model_id")
+    hf_provider = model_meta.get("hf_provider")
 
     if not hf_model_id:
         _maybe_notify_once(
@@ -350,7 +360,7 @@ def generate_probabilities(prompt, model_name, temperature, top_k, top_p):
         return _generate_simulated_probabilities(prompt, model_name, temperature, top_k, top_p)
 
     try:
-        client = _get_hf_client(hf_model_id, hf_token, hf_endpoint)
+        client = _get_hf_client(hf_model_id, hf_token, hf_endpoint, provider_override=hf_provider)
 
         request_kwargs = {
             "max_new_tokens": 1,
