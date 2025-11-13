@@ -143,27 +143,13 @@ EXAMPLE_PROMPTS = {
 }
 
 MODELS = {
-    "GPT-2 (English)": {"vocab_size": 50257, "languages": ["English"],
-                        "description": "General-purpose English model",
-                        "best_for": "Story writing, general predictions",
-                        "hf_model_id": "gpt2"},
-    "BERT Base (English)": {"vocab_size": 30522, "languages": ["English"],
-                            "description": "Mask prediction, strong context understanding",
-                            "best_for": "Fill-in-the-blank",
-                            "hf_model_id": None},
-    "BERT Multilingual": {"vocab_size": 119547,
-                          "languages": ["English","Spanish","French","German","Chinese","Arabic","Hindi","104 total"],
-                          "description": "Supports 104 languages",
-                          "best_for": "Multilingual text",
-                          "hf_model_id": None},
-    "GPT-2 Spanish": {"vocab_size": 50257, "languages": ["Spanish"],
-                      "description": "Spanish generation",
-                      "best_for": "Spanish text generation",
-                      "hf_model_id": "datificate/gpt2-small-spanish"},
-    "DistilGPT-2 (Fast)": {"vocab_size": 50257, "languages": ["English"],
-                           "description": "Smaller, faster GPT-2",
-                           "best_for": "Quick demos",
-                           "hf_model_id": "distilgpt2"}
+    "Kimi K2 (Groq)": {
+        "vocab_size": 131072,
+        "languages": ["English", "Chinese"],
+        "description": "Kimi K2 Instruct model served via Groq Inference",
+        "best_for": "Fast, instruction-tuned generation",
+        "hf_model_id": "moonshotai/Kimi-K2-Instruct-0905:groq",
+    }
 }
 
 ACTIVITIES = {
@@ -721,16 +707,24 @@ def main():
             st.session_state.current_text = st.session_state.input_text
 
         st.markdown("### 🤖 Model")
-        model_name = st.selectbox("Choose Model", list(MODELS.keys()),
-                                  index=list(MODELS.keys()).index(st.session_state.get('current_model')))
+        available_models = list(MODELS.keys())
+        model_name = st.selectbox(
+            "Choose Model",
+            available_models,
+            index=available_models.index(st.session_state.get('current_model'))
+        )
         st.session_state.current_model = model_name
         mi = MODELS[model_name]
         st.info(f"**{model_name}**  \n📊 Vocab: {mi['vocab_size']:,}  \n🌍 Languages: {', '.join(mi['languages'][:3])}{'...' if len(mi['languages'])>3 else ''}  \n✨ Best for: {mi['best_for']}")
 
-        compare_models = st.checkbox("🔄 Compare with another model")
+        compare_models = False
         model_name_2 = None
-        if compare_models:
-            model_name_2 = st.selectbox("Second Model", [m for m in MODELS.keys() if m != model_name])
+        if len(available_models) > 1:
+            compare_models = st.checkbox("🔄 Compare with another model")
+            if compare_models:
+                compare_options = [m for m in available_models if m != model_name]
+                if compare_options:
+                    model_name_2 = st.selectbox("Second Model", compare_options)
 
     # Middle: Parameters inside a form to reduce reruns
     with col_mid:
