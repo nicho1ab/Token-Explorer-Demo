@@ -27,6 +27,8 @@ from huggingface_hub import InferenceClient
 from huggingface_hub.errors import HfHubHTTPError
 from typing import Optional
 
+DEFAULT_HF_INFERENCE_BASE_URL = "https://router.huggingface.co/hf-inference"
+
 # ---------------------------------------------------------------------
 # Lightweight helpers
 # ---------------------------------------------------------------------
@@ -144,10 +146,11 @@ EXAMPLE_PROMPTS = {
 
 MODELS = {
     "Kimi K2 Thinking": {
-        "vocab_size": 131072,
+        "vocab_size": 160_000,
+        "context_window": 256_000,
         "languages": ["English", "Chinese"],
-        "description": "Kimi K2 Thinking model on Hugging Face Inference",
-        "best_for": "Chain-of-thought style text generation",
+        "description": "Moonshot AI's reasoning-focused K2 Thinking model (INT4, 256K context).",
+        "best_for": "Deep chain-of-thought, tool-augmented reasoning, long-horizon workflows",
         "hf_model_id": "moonshotai/Kimi-K2-Thinking",
         "hf_provider": "hf-inference",
     }
@@ -302,6 +305,32 @@ def _resolve_hf_endpoint() -> Optional[str]:
 
     return None
 
+
+def _resolve_hf_base_url() -> Optional[str]:
+    base_keys = [
+        "HF_INFERENCE_BASE_URL",
+        "HUGGINGFACEHUB_INFERENCE_BASE_URL",
+        "HF_BASE_URL",
+        "HUGGING_FACE_BASE_URL",
+    ]
+
+    for key in base_keys:
+        base_url = os.getenv(key)
+        if base_url:
+            return base_url.strip()
+
+    secrets_obj = getattr(st, "secrets", None)
+    if secrets_obj:
+        for key in base_keys + [k.lower() for k in base_keys]:
+            try:
+                base_url = secrets_obj.get(key) if hasattr(secrets_obj, "get") else secrets_obj[key]
+            except KeyError:
+                base_url = None
+            if base_url:
+                return str(base_url).strip()
+
+    return None
+
 @st.cache_resource(show_spinner=False)
 def _get_hf_client(
     model_id: Optional[str],
@@ -324,6 +353,8 @@ def _get_hf_client(
             provider = os.getenv("HF_INFERENCE_PROVIDER", "hf-inference").strip()
         if provider:
             client_kwargs["provider"] = provider
+        base_url = _resolve_hf_base_url() or DEFAULT_HF_INFERENCE_BASE_URL
+        client_kwargs["base_url"] = base_url.rstrip("/")
     else:
         raise ValueError("A Hugging Face model id or inference endpoint must be provided.")
 
@@ -394,7 +425,12 @@ def generate_probabilities(prompt, model_name, temperature, top_k, top_p):
         if status == 401:
             msg = "Hugging Face API rejected the token (401 Unauthorized). Verify `HF_API_TOKEN` has Inference API access."
         elif status == 404:
-            msg = f"Hugging Face model `{hf_model_id}` not found. Using simulator data."
+            msg = f"Hugging Face model `{hf_model_id}` not found or not yet available for the selected provider. Double-check the model id or set `HF_INFERENCE_PROVIDER` accordingly. Falling back to simulator."
+        elif status == 410:
+            msg = (
+                "Hugging Face has migrated Inference to `https://router.huggingface.co/hf-inference`. "
+                "Set `HF_INFERENCE_BASE_URL` to the new router or update dependencies. Using simulator data."
+            )
         else:
             msg = f"Hugging Face request failed ({status or 'HTTP error'}). Reverting to simulator data."
         _maybe_notify_once(
@@ -725,7 +761,18 @@ def main():
         )
         st.session_state.current_model = model_name
         mi = MODELS[model_name]
-        st.info(f"**{model_name}**  \n📊 Vocab: {mi['vocab_size']:,}  \n🌍 Languages: {', '.join(mi['languages'][:3])}{'...' if len(mi['languages'])>3 else ''}  \n✨ Best for: {mi['best_for']}")
+        context_line = (
+            f"\n🧠 Context: {mi['context_window']:,} tokens"
+            if mi.get("context_window")
+            else ""
+        )
+        st.info(
+            f"**{model_name}**  \n"
+            f"📊 Vocab: {mi['vocab_size']:,}  \n"
+            f"🌍 Languages: {', '.join(mi['languages'][:3])}{'...' if len(mi['languages'])>3 else ''}  \n"
+            f"✨ Best for: {mi['best_for']}"
+            f"{context_line}"
+        )
 
         compare_models = False
         model_name_2 = None
