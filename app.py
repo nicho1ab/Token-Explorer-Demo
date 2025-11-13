@@ -27,8 +27,6 @@ from huggingface_hub import InferenceClient
 from huggingface_hub.errors import HfHubHTTPError
 from typing import Optional
 
-DEFAULT_HF_INFERENCE_BASE_URL = "https://router.huggingface.co/hf-inference"
-
 # ---------------------------------------------------------------------
 # Lightweight helpers
 # ---------------------------------------------------------------------
@@ -306,31 +304,6 @@ def _resolve_hf_endpoint() -> Optional[str]:
     return None
 
 
-def _resolve_hf_base_url() -> Optional[str]:
-    base_keys = [
-        "HF_INFERENCE_BASE_URL",
-        "HUGGINGFACEHUB_INFERENCE_BASE_URL",
-        "HF_BASE_URL",
-        "HUGGING_FACE_BASE_URL",
-    ]
-
-    for key in base_keys:
-        base_url = os.getenv(key)
-        if base_url:
-            return base_url.strip()
-
-    secrets_obj = getattr(st, "secrets", None)
-    if secrets_obj:
-        for key in base_keys + [k.lower() for k in base_keys]:
-            try:
-                base_url = secrets_obj.get(key) if hasattr(secrets_obj, "get") else secrets_obj[key]
-            except KeyError:
-                base_url = None
-            if base_url:
-                return str(base_url).strip()
-
-    return None
-
 @st.cache_resource(show_spinner=False)
 def _get_hf_client(
     model_id: Optional[str],
@@ -353,8 +326,6 @@ def _get_hf_client(
             provider = os.getenv("HF_INFERENCE_PROVIDER", "hf-inference").strip()
         if provider:
             client_kwargs["provider"] = provider
-        base_url = _resolve_hf_base_url() or DEFAULT_HF_INFERENCE_BASE_URL
-        client_kwargs["base_url"] = base_url.rstrip("/")
     else:
         raise ValueError("A Hugging Face model id or inference endpoint must be provided.")
 
